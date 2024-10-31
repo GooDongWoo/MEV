@@ -10,5 +10,5 @@
 
 which python
 hostname
-python main.py
+python backbone_cifar10.py
 exit 0

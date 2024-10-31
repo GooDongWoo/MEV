@@ -7,10 +7,14 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision
 from tqdm import tqdm
+import time
+from torch.utils.tensorboard import SummaryWriter
 
+IMG_SIZE = 224
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # Load CIFAR-10 dataset
 transform = transforms.Compose([
-    transforms.Resize(224),
+    transforms.Resize(IMG_SIZE),
     transforms.ToTensor(),
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ])
@@ -23,10 +27,15 @@ train_dataset, val_dataset = random_split(full_train_dataset, [train_size, val_s
 train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
 
+test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+
 # Define the model (assuming you have a similar model as in TensorFlow)
-model = torchvision.models.vit_b_16(pretrained=True)
+model = torchvision.models.vit_b_16(weights=torchvision.models.ViT_B_16_Weights.DEFAULT)
+
+# Update the input size to match 224x224 for ViT
 model.heads.head = nn.Linear(model.heads.head.in_features, 10)
-model = model.to('cuda' if torch.cuda.is_available() else 'cpu')
+model = model.to(device)
 
 # Define loss function and optimizer
 criterion = nn.CrossEntropyLoss()
@@ -41,8 +50,12 @@ early_stop_counter = 0
 best_val_accuracy = 0.0
 
 # Training loop
-def train(model, train_loader, val_loader, criterion, optimizer, scheduler, max_epochs):
-    global best_val_accuracy, early_stop_counter
+def train(model, train_loader, val_loader, test_loader, criterion, optimizer, scheduler, max_epochs):
+    global best_val_accuracy, early_stop_counter,IMG_SIZE
+    current_time = time.strftime('%m%d_%H%M%S', time.localtime())
+    writer = SummaryWriter('./runs/'+current_time,)
+    #writer.add_graph(model, torch.rand(64,3,IMG_SIZE,IMG_SIZE).to(device))
+    
     for epoch in range(max_epochs):
         model.train()
         running_loss = 0.0
@@ -70,22 +83,45 @@ def train(model, train_loader, val_loader, criterion, optimizer, scheduler, max_
                 t.set_postfix(loss=running_loss/len(train_loader), accuracy=100 * correct / total)
 
         train_accuracy = 100 * correct / total
-        print(f"Epoch [{epoch+1}/{max_epochs}], Loss: {running_loss/len(train_loader):.4f}, Train Accuracy: {train_accuracy:.2f}%")
+        writer.add_scalar(f'train/loss', running_loss/len(train_loader), epoch)
+        writer.add_scalar(f'train/acc', train_accuracy, epoch)
 
         # Validation phase
         model.eval()
+        running_loss = 0.0
         val_correct = 0
         val_total = 0
         with torch.no_grad():
             for images, labels in val_loader:
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
+                loss = criterion(outputs, labels)
+                running_loss += loss.item()
                 _, predicted = torch.max(outputs.data, 1)
                 val_total += labels.size(0)
                 val_correct += (predicted == labels).sum().item()
 
         val_accuracy = 100 * val_correct / val_total
-        print(f"Validation Accuracy: {val_accuracy:.2f}%")
+        writer.add_scalar(f'val/loss', running_loss/len(val_loader), epoch)
+        writer.add_scalar(f'val/acc', val_accuracy, epoch)
+
+        # Test phase
+        running_loss = 0.0
+        test_correct = 0
+        test_total = 0
+        with torch.no_grad():
+            for images, labels in test_loader:
+                images, labels = images.to(device), labels.to(device)
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                running_loss += loss.item()
+                _, predicted = torch.max(outputs.data, 1)
+                test_total += labels.size(0)
+                test_correct += (predicted == labels).sum().item()
+
+        test_accuracy = 100 * test_correct / test_total
+        writer.add_scalar(f'test/loss', running_loss/len(train_loader), epoch)
+        writer.add_scalar(f'test/acc', test_accuracy, epoch)
 
         # Check for best validation accuracy
         if val_accuracy > best_val_accuracy:
@@ -106,10 +142,11 @@ def train(model, train_loader, val_loader, criterion, optimizer, scheduler, max_
             break
 
     print("Training complete")
+    writer.close()
     return model, best_val_accuracy
 
 # Training the model
 max_epochs = 100  # Set your max epochs
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-model, test_accuracy = train(model, train_loader, val_loader, criterion, optimizer, scheduler, max_epochs)
+
+model, test_accuracy = train(model, train_loader, val_loader, test_loader, criterion, optimizer, scheduler, max_epochs)
 print(f"Best Validation Accuracy: {test_accuracy:.2f}%")

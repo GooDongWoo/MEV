@@ -277,9 +277,9 @@ def train_val(model, params):   #TODO 모델 불러오기
     
     return model
 model = MultiExitViT(pretrained_vit).to(device)
-optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=0.0001)
+optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=0.001)
 criterion = nn.CrossEntropyLoss()
-lr_scheduler=ReduceLROnPlateau(optimizer, mode='min', factor=0.6, patience=5, verbose=True)
+lr_scheduler=ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, verbose=True)
 
 params={'num_epochs':100, 'loss_func':criterion, 'optimizer':optimizer, 
         'train_dl':train_loader, 'val_dl':val_loader, 'lr_scheduler':lr_scheduler, 

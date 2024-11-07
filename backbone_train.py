@@ -12,12 +12,6 @@ from torch.utils.tensorboard import SummaryWriter
 
 IMG_SIZE = 224
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-# Load dataset
-transform = transforms.Compose([
-    transforms.Resize(IMG_SIZE),
-    transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-])
 dataset_name=dict()
 dataset_name['cifar10']=datasets.CIFAR10
 dataset_name['cifar100']=datasets.CIFAR100
@@ -28,9 +22,21 @@ dataset_outdim['cifar100']=100
 
 ##############################################################
 data_choice='cifar100'
+isload=False
+max_epochs = 100  # Set your max epochs
+
 start_lr=5e-5
-isload=True
+weight_decay=1e-4
+# Early stopping parameters
+early_stop_patience = 5
+early_stop_counter = 0
+best_val_accuracy = 0.0
 ##############################################################
+transform = transforms.Compose([
+    transforms.Resize(IMG_SIZE),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+])
 
 train_dataset = dataset_name[data_choice](root='./data', train=True, download=True, transform=transform)
 train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
@@ -51,21 +57,17 @@ if isload:
     print('model loaded')
 # Define loss function and optimizer
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=start_lr)
+optimizer = optim.Adam(model.parameters(), lr=start_lr, weight_decay=weight_decay)
 
 # Define learning rate scheduler
 scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.6, patience=2, verbose=True, min_lr=1e-7)
-
-# Early stopping parameters
-early_stop_patience = 5
-early_stop_counter = 0
-best_val_accuracy = 0.0
 
 # Training loop
 def train(model, train_loader, test_loader, criterion, optimizer, scheduler, max_epochs):
     global best_val_accuracy, early_stop_counter,IMG_SIZE
     current_time = time.strftime('%m%d_%H%M%S', time.localtime())
-    writer = SummaryWriter('./runs/'+current_time,)
+    prefix = f'vit_{data_choice}_backbone_'
+    writer = SummaryWriter('./runs/'+prefix+current_time,)
     
     for epoch in range(max_epochs):
         model.train()
@@ -73,7 +75,7 @@ def train(model, train_loader, test_loader, criterion, optimizer, scheduler, max
         correct = 0
         total = 0
 
-        with tqdm(train_loader, desc=f"Epoch [{epoch+1}/{max_epochs}]", unit="batch") as t:
+        with tqdm(train_loader, desc=f"Epoch [{epoch+1}/{max_epochs}]", unit="batch",leave=False) as t:
             for images, labels in t:
                 images, labels = images.to(device), labels.to(device)
 
@@ -136,9 +138,6 @@ def train(model, train_loader, test_loader, criterion, optimizer, scheduler, max
     print("Training complete")
     writer.close()
     return model, best_val_accuracy
-
-# Training the model
-max_epochs = 100  # Set your max epochs
 
 model, test_accuracy = train(model, train_loader, test_loader, criterion, optimizer, scheduler, max_epochs)
 print(f"Best Validation Accuracy: {test_accuracy:.2f}%")

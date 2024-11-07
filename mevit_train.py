@@ -4,54 +4,69 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, transforms,models
 from torch.utils.data import DataLoader
-import torch.nn.functional as F
 from tqdm import tqdm  # Importing tqdm for progress bar
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 import time
 #from torchsummary import summary as summary_
 import os
 from torch.utils.tensorboard import SummaryWriter
 
-# Check if GPU is available, otherwise fallback to CPU
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
 IMG_SIZE = 224
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+dataset_name=dict()
+dataset_name['cifar10']=datasets.CIFAR10
+dataset_name['cifar100']=datasets.CIFAR100
 
-# 데이터셋 전처리 설정: CIFAR-10을 사용하고 이미지 크기를 32로 리사이즈
+dataset_outdim=dict()
+dataset_outdim['cifar10']=10
+dataset_outdim['cifar100']=100
+
+##############################################################
+batch_size = 32
+data_choice='cifar100'
+mevit_isload=False
+max_epochs = 100  # Set your max epochs
+
+backbone_path=f'vit_{data_choice}_backbone.pth'
+start_lr=5e-5
+weight_decay=1e-4
+# Early stopping parameters
+early_stop_patience = 5
+early_stop_counter = 0
+best_val_accuracy = 0.0
+##############################################################
+# # 1. Data Preparation and Pretrained ViT model
 transform = transforms.Compose([
-    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.Resize(IMG_SIZE),
     transforms.ToTensor(),
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ])
 
-full_train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-train_size = int(0.8 * len(full_train_dataset))
-val_size = len(full_train_dataset) - train_size
-train_dataset, val_dataset = random_split(full_train_dataset, [train_size, val_size])
+train_dataset = dataset_name[data_choice](root='./data', train=True, download=True, transform=transform)
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+test_dataset = dataset_name[data_choice](root='./data', train=False, download=True, transform=transform)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
-test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 # Load the pretrained ViT model from the saved file
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
 pretrained_vit = models.vit_b_16(weights=None)
-pretrained_vit.heads.head = nn.Linear(pretrained_vit.heads.head.in_features, 10)  # Ensure output matches the number of classes
+pretrained_vit.heads.head = nn.Linear(pretrained_vit.heads.head.in_features, dataset_outdim[data_choice])  # Ensure output matches the number of classes
 
 # Load model weights
-pretrained_vit.load_state_dict(torch.load('vit_cifar10_v1.pth', map_location=device))
+pretrained_vit.load_state_dict(torch.load(backbone_path, map_location=device))
 pretrained_vit = pretrained_vit.to(device)
 #from torchinfo import summary
 #summary(pretrained_vit,input_size= (64, 3, IMG_SIZE, IMG_SIZE))
 
 ##############################################################
+# # 2. Define Multi-Exit ViT
 class MultiExitViT(nn.Module):
     def __init__(self, base_model,dim=768, ee_list=[0,1,2,3,4,5,6,7,8,9],exit_loss_weights=[1,1,1,1,1,1,1,1,1,1,1],num_classes=10,image_size=IMG_SIZE,patch_size=16):
         super(MultiExitViT, self).__init__()
+        assert len(ee_list)+1==len(exit_loss_weights), 'len(ee_list)+1==len(exit_loss_weights) should be True'
         self.base_model = base_model
-        
+
         self.class_token = nn.Parameter(torch.zeros(1, 1, dim))
         self.patch_size=patch_size
         self.hidden_dim=dim
@@ -106,6 +121,7 @@ class MultiExitViT(nn.Module):
         return x
     
     def forward(self, x):
+        ee_cnter=0
         outputs = []
         x = self._process_input(x)
         n = x.shape[0]
@@ -118,10 +134,11 @@ class MultiExitViT(nn.Module):
         for idx, block in enumerate(self.encoder_blocks):
             x = block(x)
             if idx in self.ee_list:
-                y = self.ees[idx](x)
+                y = self.ees[ee_cnter](x)#TODO: check if (idx) this is correct
                 y = y[:, 0]
-                y = self.classifiers[idx](y)
+                y = self.classifiers[ee_cnter](y)
                 outputs.append(y)
+                ee_cnter+=1
         # Classifier "token" as used by standard language architectures
         # Append the final output from the original head
         x = self.ln(x)
@@ -130,8 +147,6 @@ class MultiExitViT(nn.Module):
         x = self.heads(x)
         outputs.append(x)
         return outputs
-    
-    
 ##############################################################
 # # 3. Training part
 # function to get current lr
@@ -172,17 +187,19 @@ def loss_epoch(model, loss_func, dataset_dl, writer, epoch, opt=None):
     len_data = len(dataset_dl.dataset)
     TorV='train' if opt is not None else 'val'
     
-    
-    for xb, yb in tqdm(dataset_dl, desc=TorV, leave=False):
-        xb = xb.to(device)
-        yb = yb.to(device)
-        output_list = model(xb)
-        elws=model.getELW()
+    with tqdm(dataset_dl, desc=f"{TorV}: {epoch}th Epoch", unit="batch",leave=False) as t:
+        for xb, yb in t:
+            xb = xb.to(device)
+            yb = yb.to(device)
+            output_list = model(xb)
+            elws=model.getELW()
 
-        losses, acc_s = loss_batch(loss_func, output_list, yb, elws, opt)
+            losses, acc_s = loss_batch(loss_func, output_list, yb, elws, opt)
 
-        running_loss = [sum(i) for i in zip(running_loss,losses)]
-        running_metric = [sum(i) for i in zip(running_metric,acc_s)]
+            running_loss = [sum(i) for i in zip(running_loss,losses)]
+            running_metric = [sum(i) for i in zip(running_metric,acc_s)]
+            
+            t.set_postfix(loss=losses, accuracy=100 * acc_s / len(xb))
     
     running_loss=[i/len_data for i in running_loss]
     running_acc=[100*i/len_data for i in running_metric]
@@ -202,15 +219,10 @@ def loss_epoch(model, loss_func, dataset_dl, writer, epoch, opt=None):
 
 # function to start training
 def train_val(model, params):   #TODO 모델 불러오기
-    num_epochs=params['num_epochs']
-    loss_func=params["loss_func"]
-    opt=params["optimizer"]
-    train_dl=params["train_dl"]
-    val_dl=params["val_dl"]
-    lr_scheduler=params["lr_scheduler"]
-    isload=params["isload"]
-    path_chckpnt=params["path_chckpnt"]
-    resize=params["resize"]
+    num_epochs=params['num_epochs'];loss_func=params["loss_func"]
+    opt=params["optimizer"];train_dl=params["train_dl"]
+    val_dl=params["val_dl"];lr_scheduler=params["lr_scheduler"]
+    isload=params["isload"];path_chckpnt=params["path_chckpnt"]
     
     start_time = time.time()
     
@@ -276,13 +288,13 @@ def train_val(model, params):   #TODO 모델 불러오기
         file.write(result_txt)
     
     return model
-model = MultiExitViT(pretrained_vit).to(device)
-optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=0.001)
+model = MultiExitViT(pretrained_vit,num_classes=dataset_outdim[data_choice]).to(device)
+optimizer = optim.Adam(model.parameters(), lr=start_lr, weight_decay=weight_decay)
 criterion = nn.CrossEntropyLoss()
 lr_scheduler=ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, verbose=True)
 
 params={'num_epochs':100, 'loss_func':criterion, 'optimizer':optimizer, 
-        'train_dl':train_loader, 'val_dl':val_loader, 'lr_scheduler':lr_scheduler, 
-        'isload':False, 'path_chckpnt':'vit_cifar10_v1.pth', 'resize':IMG_SIZE}
+        'train_dl':train_loader, 'val_dl':test_loader, 'lr_scheduler':lr_scheduler, 
+        'isload':False, 'path_chckpnt':'vit_cifar10_v1.pth'}
 
 train_val(model=model, params=params)

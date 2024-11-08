@@ -23,14 +23,14 @@ dataset_outdim['cifar10']=10
 dataset_outdim['cifar100']=100
 
 ##############################################################
-batch_size = 32
+batch_size = 56
 data_choice='cifar10'
 mevit_isload=True
-mevit_pretrained_path=f'models/1107_094226/best_model.pth'
+mevit_pretrained_path=f'models/1108_103451/best_model.pth'
 max_epochs = 100  # Set your max epochs
 
 backbone_path=f'vit_{data_choice}_backbone.pth'
-start_lr=1e-4
+start_lr=1e-3
 weight_decay=1e-4
 # Early stopping parameters
 early_stop_patience = 5
@@ -220,7 +220,7 @@ def loss_epoch(model, loss_func, dataset_dl, writer, epoch, opt=None):
     return losses_sum, accs
 
 # function to start training
-def train_val(model, params):   #TODO 모델 불러오기
+def train_val(model, params):   
     num_epochs=params['num_epochs'];loss_func=params["loss_func"]
     opt=params["optimizer"];train_dl=params["train_dl"]
     val_dl=params["val_dl"];lr_scheduler=params["lr_scheduler"]
@@ -241,12 +241,10 @@ def train_val(model, params):   #TODO 모델 불러오기
     old_epoch=0
     if(isload):
         chckpnt = torch.load(path_chckpnt,weights_only=True)
-        model.load_state_dict(chckpnt)
-        '''chckpnt = torch.load(path_chckpnt,weights_only=True)
         model.load_state_dict(chckpnt['model_state_dict'])
         opt.load_state_dict(chckpnt['optimizer_state_dict'])
         old_epoch = chckpnt['epoch']
-        best_loss = chckpnt['loss']'''
+        best_loss = chckpnt['loss']
     
     #writer=None
     writer = SummaryWriter('./runs/'+current_time,)
@@ -271,7 +269,7 @@ def train_val(model, params):   #TODO 모델 불러오기
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': opt.state_dict(),
             'loss': val_loss,
-            }, path+'/chckpoint.pth')
+            }, path+'/best_model.pth')
             print('saved best model weights!')
             print('Get best val_loss')
 
@@ -302,7 +300,7 @@ optimizer = optim.Adam(model.parameters(), lr=start_lr, weight_decay=weight_deca
 criterion = nn.CrossEntropyLoss()
 lr_scheduler=ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, verbose=True)
 
-params={'num_epochs':100, 'loss_func':criterion, 'optimizer':optimizer, 
+params={'num_epochs':max_epochs, 'loss_func':criterion, 'optimizer':optimizer, 
         'train_dl':train_loader, 'val_dl':test_loader, 'lr_scheduler':lr_scheduler, 
         'isload':mevit_isload, 'path_chckpnt':mevit_pretrained_path}
 

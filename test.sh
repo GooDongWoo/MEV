@@ -10,5 +10,5 @@
 
 which python
 hostname
-python backbone_cifar10.py
+python mevit_train.py
 exit 0

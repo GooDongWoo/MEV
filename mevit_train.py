@@ -24,12 +24,13 @@ dataset_outdim['cifar100']=100
 
 ##############################################################
 batch_size = 32
-data_choice='cifar100'
-mevit_isload=False
+data_choice='cifar10'
+mevit_isload=True
+mevit_pretrained_path=f'models/1107_094226/best_model.pth'
 max_epochs = 100  # Set your max epochs
 
 backbone_path=f'vit_{data_choice}_backbone.pth'
-start_lr=5e-5
+start_lr=1e-4
 weight_decay=1e-4
 # Early stopping parameters
 early_stop_patience = 5
@@ -199,7 +200,8 @@ def loss_epoch(model, loss_func, dataset_dl, writer, epoch, opt=None):
             running_loss = [sum(i) for i in zip(running_loss,losses)]
             running_metric = [sum(i) for i in zip(running_metric,acc_s)]
             
-            t.set_postfix(loss=losses, accuracy=100 * acc_s / len(xb))
+            batch_acc=[100*i/len(xb) for i in acc_s]
+            t.set_postfix(loss=losses, accuracy=batch_acc)
     
     running_loss=[i/len_data for i in running_loss]
     running_acc=[100*i/len_data for i in running_metric]
@@ -239,10 +241,12 @@ def train_val(model, params):   #TODO 모델 불러오기
     old_epoch=0
     if(isload):
         chckpnt = torch.load(path_chckpnt,weights_only=True)
+        model.load_state_dict(chckpnt)
+        '''chckpnt = torch.load(path_chckpnt,weights_only=True)
         model.load_state_dict(chckpnt['model_state_dict'])
         opt.load_state_dict(chckpnt['optimizer_state_dict'])
         old_epoch = chckpnt['epoch']
-        best_loss = chckpnt['loss']
+        best_loss = chckpnt['loss']'''
     
     #writer=None
     writer = SummaryWriter('./runs/'+current_time,)
@@ -262,7 +266,12 @@ def train_val(model, params):   #TODO 모델 불러오기
         if val_loss < best_loss:
             best_loss = val_loss
             #best_model_wts = copy.deepcopy(model.state_dict())
-            torch.save(model.state_dict(), path+'/best_model.pth')
+            torch.save({
+            'epoch': num_epochs,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': opt.state_dict(),
+            'loss': val_loss,
+            }, path+'/chckpoint.pth')
             print('saved best model weights!')
             print('Get best val_loss')
 
@@ -295,6 +304,6 @@ lr_scheduler=ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, ve
 
 params={'num_epochs':100, 'loss_func':criterion, 'optimizer':optimizer, 
         'train_dl':train_loader, 'val_dl':test_loader, 'lr_scheduler':lr_scheduler, 
-        'isload':False, 'path_chckpnt':'vit_cifar10_v1.pth'}
+        'isload':mevit_isload, 'path_chckpnt':mevit_pretrained_path}
 
 train_val(model=model, params=params)

@@ -42,18 +42,25 @@ model_path = f'vit_{data_choice}_backbone.pth'
 pretrained_vit.load_state_dict(torch.load(model_path, map_location=device))
 pretrained_vit = pretrained_vit.to(device)
 
-# Set the model to evaluation mode
-pretrained_vit.eval()
+def getTestACC():
+    # Set the model to evaluation mode
+    pretrained_vit.eval()
+    # Test the model on the test set
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        with tqdm(test_loader, unit="batch",leave=False) as t:
+            for images, labels in tqdm(test_loader):
+                images, labels = images.to(device), labels.to(device)
+                outputs = pretrained_vit(images)
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
 
-# Test the model on the test set
-correct = 0
-total = 0
-with torch.no_grad():
-    for images, labels in tqdm(test_loader):
-        images, labels = images.to(device), labels.to(device)
-        outputs = pretrained_vit(images)
-        _, predicted = torch.max(outputs.data, 1)
-        total += labels.size(0)
-        correct += (predicted == labels).sum().item()
+                t.set_postfix(accuracy=100*correct/total)
 
-print(f"Accuracy of the model on the {len(test_dataset)} test images: {100 * correct / total}%")
+    print(f"Accuracy of the model on the {len(test_dataset)} test images: {100 * correct / total}%")
+
+#getTestACC()
+from torchinfo import summary
+summary(pretrained_vit,input_size= (64, 3, IMG_SIZE, IMG_SIZE))

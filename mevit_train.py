@@ -23,14 +23,14 @@ dataset_outdim['cifar10']=10
 dataset_outdim['cifar100']=100
 
 ##############################################################
-batch_size = 56
-data_choice='cifar10'
-mevit_isload=True
+batch_size = 32
+data_choice='cifar100'
+mevit_isload=False
 mevit_pretrained_path=f'models/1108_103451/best_model.pth'
 max_epochs = 100  # Set your max epochs
 
 backbone_path=f'vit_{data_choice}_backbone.pth'
-start_lr=1e-3
+start_lr=1e-4
 weight_decay=1e-4
 # Early stopping parameters
 early_stop_patience = 5
@@ -55,11 +55,17 @@ pretrained_vit = models.vit_b_16(weights=None)
 pretrained_vit.heads.head = nn.Linear(pretrained_vit.heads.head.in_features, dataset_outdim[data_choice])  # Ensure output matches the number of classes
 
 # Load model weights
-pretrained_vit.load_state_dict(torch.load(backbone_path, map_location=device))
+pretrained_vit.load_state_dict(torch.load(backbone_path))
 pretrained_vit = pretrained_vit.to(device)
 #from torchinfo import summary
 #summary(pretrained_vit,input_size= (64, 3, IMG_SIZE, IMG_SIZE))
+#freezing model
+for param in pretrained_vit.parameters():
+    param.requires_grad = False
 
+for name, param in pretrained_vit.named_parameters():
+    print(f"{name}: {'Trainable' if param.requires_grad else 'Frozen'}")
+    
 ##############################################################
 # # 2. Define Multi-Exit ViT
 class MultiExitViT(nn.Module):
@@ -68,7 +74,7 @@ class MultiExitViT(nn.Module):
         assert len(ee_list)+1==len(exit_loss_weights), 'len(ee_list)+1==len(exit_loss_weights) should be True'
         self.base_model = base_model
 
-        self.class_token = nn.Parameter(torch.zeros(1, 1, dim))
+        self.class_token = base_model.class_token
         self.patch_size=patch_size
         self.hidden_dim=dim
         self.image_size=image_size
@@ -82,12 +88,12 @@ class MultiExitViT(nn.Module):
         self.classifiers = nn.ModuleList([nn.Linear(dim, num_classes) for _ in range(len(ee_list))])
         
         # base model load
-        self.conv_proj = self.base_model.conv_proj
-        self.encoder_blocks = nn.ModuleList([encoderblock for encoderblock in [*pretrained_vit.encoder.layers]])
+        self.conv_proj = base_model.conv_proj
+        self.encoder_blocks = nn.ModuleList([encoderblock for encoderblock in [*base_model.encoder.layers]])
         
         # Final head
-        self.ln= self.base_model.encoder.ln
-        self.heads = self.base_model.heads
+        self.ln= base_model.encoder.ln
+        self.heads = base_model.heads
 
     def create_exit_Tblock(self, dim):
         return nn.Sequential(
@@ -201,7 +207,7 @@ def loss_epoch(model, loss_func, dataset_dl, writer, epoch, opt=None):
             running_metric = [sum(i) for i in zip(running_metric,acc_s)]
             
             batch_acc=[100*i/len(xb) for i in acc_s]
-            t.set_postfix(loss=losses, accuracy=batch_acc)
+            t.set_postfix(accuracy=batch_acc)
     
     running_loss=[i/len_data for i in running_loss]
     running_acc=[100*i/len_data for i in running_metric]
@@ -225,6 +231,8 @@ def train_val(model, params):
     opt=params["optimizer"];train_dl=params["train_dl"]
     val_dl=params["val_dl"];lr_scheduler=params["lr_scheduler"]
     isload=params["isload"];path_chckpnt=params["path_chckpnt"]
+    classifier_wise=params["classifier_wise"]
+    unfreeze_num=params["unfreeze_num"];freeze_last=params["freeze_last"]
     
     start_time = time.time()
     
@@ -246,6 +254,11 @@ def train_val(model, params):
         old_epoch = chckpnt['epoch']
         best_loss = chckpnt['loss']
     
+    if classifier_wise:
+        #freeze all except classifier
+        pass    
+        #unfreeze specific classifier
+        pass
     #writer=None
     writer = SummaryWriter('./runs/'+current_time,)
     #writer.add_graph(model, torch.rand(1,3,resize,resize).to(next(model.parameters()).device))
@@ -255,6 +268,8 @@ def train_val(model, params):
         print('Epoch {}/{}, current lr={}'.format(epoch, old_epoch+num_epochs-1, current_lr))
 
         model.train()
+        
+        
         train_loss, train_accs = loss_epoch(model, loss_func, train_dl, writer, epoch, opt)
 
         model.eval()
@@ -295,13 +310,16 @@ def train_val(model, params):
         file.write(result_txt)
     
     return model
-model = MultiExitViT(pretrained_vit,num_classes=dataset_outdim[data_choice]).to(device)
+model = MultiExitViT(pretrained_vit,num_classes=dataset_outdim[data_choice],ee_list=[0,1,2,3,4,5,6,7,8,9],exit_loss_weights=[1,1,1,1,1,1,1,1,1,1,1]).to(device)
 optimizer = optim.Adam(model.parameters(), lr=start_lr, weight_decay=weight_decay)
 criterion = nn.CrossEntropyLoss()
 lr_scheduler=ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, verbose=True)
 
 params={'num_epochs':max_epochs, 'loss_func':criterion, 'optimizer':optimizer, 
         'train_dl':train_loader, 'val_dl':test_loader, 'lr_scheduler':lr_scheduler, 
-        'isload':mevit_isload, 'path_chckpnt':mevit_pretrained_path}
+        'isload':mevit_isload, 'path_chckpnt':mevit_pretrained_path,'classifier_wise':True,
+        'unfreeze_num':0,'freeze_last':1}
 
 train_val(model=model, params=params)
+#from torchinfo import summary
+#summary(pretrained_vit,input_size= (64, 3, IMG_SIZE, IMG_SIZE))

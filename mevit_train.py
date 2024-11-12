@@ -23,7 +23,10 @@ dataset_outdim['cifar10']=10
 dataset_outdim['cifar100']=100
 
 ##############################################################
-batch_size = 32
+################ 0. Hyperparameters ##########################
+unfreeze_ees_list=[0,1,2,3,4,5,6,7,8,9]
+##############################################################
+batch_size = 56
 data_choice='cifar100'
 mevit_isload=False
 mevit_pretrained_path=f'models/1108_103451/best_model.pth'
@@ -32,6 +35,13 @@ max_epochs = 100  # Set your max epochs
 backbone_path=f'vit_{data_choice}_backbone.pth'
 start_lr=1e-4
 weight_decay=1e-4
+
+ee_list=[0,1,2,3,4,5,6,7,8,9]#exit list ex) [0,1,2,3,4,5,6,7,8,9]
+exit_loss_weights=[1,1,1,1,1,1,1,1,1,1,1]#exit마다 가중치
+
+classifier_wise=True
+unfreeze_ees=[0] #unfreeze exit list ex) [0,1,2,3,4,5,6,7,8,9]
+
 # Early stopping parameters
 early_stop_patience = 5
 early_stop_counter = 0
@@ -63,9 +73,6 @@ pretrained_vit = pretrained_vit.to(device)
 for param in pretrained_vit.parameters():
     param.requires_grad = False
 
-for name, param in pretrained_vit.named_parameters():
-    print(f"{name}: {'Trainable' if param.requires_grad else 'Frozen'}")
-    
 ##############################################################
 # # 2. Define Multi-Exit ViT
 class MultiExitViT(nn.Module):
@@ -74,26 +81,27 @@ class MultiExitViT(nn.Module):
         assert len(ee_list)+1==len(exit_loss_weights), 'len(ee_list)+1==len(exit_loss_weights) should be True'
         self.base_model = base_model
 
-        self.class_token = base_model.class_token
         self.patch_size=patch_size
         self.hidden_dim=dim
         self.image_size=image_size
         
-        self.exit_loss_weights = [elw/sum(exit_loss_weights) for elw in exit_loss_weights]
+        # base model load
+        self.conv_proj = base_model.conv_proj
+        self.class_token = base_model.class_token
+        self.pos_embedding = base_model.encoder.pos_embedding
+        self.dropdout=base_model.encoder.dropout
+        self.encoder_blocks = nn.ModuleList([encoderblock for encoderblock in [*base_model.encoder.layers]])
+        self.ln= base_model.encoder.ln
+        self.heads = base_model.heads
         
         # Multiple Exit Blocks 추가
+        self.exit_loss_weights = [elw/sum(exit_loss_weights) for elw in exit_loss_weights]
         self.ee_list = ee_list
         self.exit_num=len(ee_list)+1
         self.ees = nn.ModuleList([self.create_exit_Tblock(dim) for _ in range(len(ee_list))])
         self.classifiers = nn.ModuleList([nn.Linear(dim, num_classes) for _ in range(len(ee_list))])
         
-        # base model load
-        self.conv_proj = base_model.conv_proj
-        self.encoder_blocks = nn.ModuleList([encoderblock for encoderblock in [*base_model.encoder.layers]])
         
-        # Final head
-        self.ln= base_model.encoder.ln
-        self.heads = base_model.heads
 
     def create_exit_Tblock(self, dim):
         return nn.Sequential(
@@ -136,12 +144,14 @@ class MultiExitViT(nn.Module):
         # Expand the class token to the full batch
         batch_class_token = self.class_token.expand(n, -1, -1)
         x = torch.cat([batch_class_token, x], dim=1)
-
+        x = x + self.pos_embedding
+        x = self.dropdout(x)
+        
         #x = self.encoder(x)
         for idx, block in enumerate(self.encoder_blocks):
             x = block(x)
             if idx in self.ee_list:
-                y = self.ees[ee_cnter](x)#TODO: check if (idx) this is correct
+                y = self.ees[ee_cnter](x)
                 y = y[:, 0]
                 y = self.classifiers[ee_cnter](y)
                 outputs.append(y)
@@ -156,167 +166,189 @@ class MultiExitViT(nn.Module):
         return outputs
 ##############################################################
 # # 3. Training part
-# function to get current lr
-def get_lr(opt):
-    for param_group in opt.param_groups:
-        return param_group['lr']
+class Trainer:
+    def __init__(self, model, params):
+        self.model = model
+        self.num_epochs = params['num_epochs'];self.loss_func = params["loss_func"]
+        self.opt = params["optimizer"];self.train_dl = params["train_dl"]
+        self.val_dl = params["val_dl"];self.lr_scheduler = params["lr_scheduler"]
+        self.isload = params["isload"];self.path_chckpnt = params["path_chckpnt"]
+        self.classifier_wise = params["classifier_wise"];self.unfreeze_ees = params["unfreeze_ees"]
+        self.best_loss = float('inf')
+        self.old_epoch = 0
+        self.device = next(model.parameters()).device
 
-# function to calculate metric per mini-batch
-def metric_batch(output, label):
-    pred = output.argmax(1, keepdim=True)
-    corrects = pred.eq(label.view_as(pred)).sum().item()
-    return corrects
+        # Initialize directory for model saving
+        self.current_time = time.strftime('%m%d_%H%M%S', time.localtime())
+        self.path = f'./models/{self.current_time}'
+        os.makedirs(self.path, exist_ok=True)
 
-# function to calculate loss per mini-batch
-def loss_batch(loss_func, output_list, label, elws, opt=None):
-    losses = [loss_func(output,label)*elw for output,elw in zip(output_list,elws)]
-    acc_s = [metric_batch(output, label) for output in output_list]
-    
-    if opt is not None:
-        opt.zero_grad()
-        for loss in losses[:-1]:
-            loss.backward(retain_graph=True)
-        #final loss, graph not required
-        losses[-1].backward()
-        opt.step()
-    
-    losses = [loss.item() for loss in losses]
-    
-    return losses, acc_s
+        # Setup TensorBoard writer
+        self.writer = SummaryWriter(f'./runs/{self.current_time}')
 
-# function to calculate loss and metric per epoch
-def loss_epoch(model, loss_func, dataset_dl, writer, epoch, opt=None):
-    device = next(model.parameters()).device
-    running_loss = [0.0] * model.exit_num
-    running_metric = [0.0] * model.exit_num
-    len_data = len(dataset_dl.dataset)
-    TorV='train' if opt is not None else 'val'
-    
-    with tqdm(dataset_dl, desc=f"{TorV}: {epoch}th Epoch", unit="batch",leave=False) as t:
-        for xb, yb in t:
-            xb = xb.to(device)
-            yb = yb.to(device)
-            output_list = model(xb)
-            elws=model.getELW()
+        # Load model checkpoint if required
+        if self.isload:
+            self._load_checkpoint()
 
-            losses, acc_s = loss_batch(loss_func, output_list, yb, elws, opt)
+        # Optionally freeze layers
+        if self.classifier_wise:
+            self._freeze_layers()
 
-            running_loss = [sum(i) for i in zip(running_loss,losses)]
-            running_metric = [sum(i) for i in zip(running_metric,acc_s)]
-            
-            batch_acc=[100*i/len(xb) for i in acc_s]
-            t.set_postfix(accuracy=batch_acc)
-    
-    running_loss=[i/len_data for i in running_loss]
-    running_acc=[100*i/len_data for i in running_metric]
-    
-    # Tensorboard
-    tmp_loss_dict = dict();tmp_acc_dict = dict()
-    for idx in range(model.exit_num):
-        tmp_loss_dict[f'exit{idx}'] = running_loss[idx];tmp_acc_dict[f'exit{idx}'] = running_acc[idx]
-    writer.add_scalars(f'{TorV}/loss', tmp_loss_dict, epoch)
-    writer.add_scalars(f'{TorV}/acc', tmp_acc_dict, epoch)
-    
-    losses_sum = sum(running_loss) # float
-    writer.add_scalar(f'{TorV}/loss_total_sum', losses_sum, epoch)
-    accs = running_acc # float list[exit_num]
+        # Save model specifications
+        self._save_specifications()
 
-    return losses_sum, accs
+    def _load_checkpoint(self):
+        """Load model checkpoint and optimizer state."""
+        checkpoint = torch.load(self.path_chckpnt)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.opt.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.old_epoch = checkpoint['epoch']
+        self.best_loss = checkpoint['loss']
 
-# function to start training
-def train_val(model, params):   
-    num_epochs=params['num_epochs'];loss_func=params["loss_func"]
-    opt=params["optimizer"];train_dl=params["train_dl"]
-    val_dl=params["val_dl"];lr_scheduler=params["lr_scheduler"]
-    isload=params["isload"];path_chckpnt=params["path_chckpnt"]
-    classifier_wise=params["classifier_wise"]
-    unfreeze_num=params["unfreeze_num"];freeze_last=params["freeze_last"]
-    
-    start_time = time.time()
-    
-    # path to save the model weights
-    current_time = time.strftime('%m%d_%H%M%S', time.localtime())
-    path=f'./models/{current_time}'
-    os.makedirs(path, exist_ok=True)
-    
-    spec_txt=f'opt: {opt.__class__.__name__}\nlr: {opt.param_groups[0]["lr"]}\nbatch: {train_dl.batch_size}\nepoch: {num_epochs}\nisload: {isload}\npath_chckpnt: {path_chckpnt}\nexits_loss_weights: {model.getELW()}\n'
-    with open(f"{path}/spec.txt", "w") as file:
-        file.write(spec_txt)
-    
-    best_loss = float('inf')
-    old_epoch=0
-    if(isload):
-        chckpnt = torch.load(path_chckpnt,weights_only=True)
-        model.load_state_dict(chckpnt['model_state_dict'])
-        opt.load_state_dict(chckpnt['optimizer_state_dict'])
-        old_epoch = chckpnt['epoch']
-        best_loss = chckpnt['loss']
-    
-    if classifier_wise:
-        #freeze all
-        for param in model.parameters():
+    def _freeze_layers(self):
+        """Freeze layers based on classifier_wise and unfreeze_ees settings."""
+        for param in self.model.parameters():
             param.requires_grad = False
-        #unfreeze specific classifier
-        pass
-    #writer=None
-    writer = SummaryWriter('./runs/'+current_time,)
-    #writer.add_graph(model, torch.rand(1,3,resize,resize).to(next(model.parameters()).device))
-    
-    for epoch in range(old_epoch,old_epoch+num_epochs):
-        current_lr = get_lr(opt)
-        print('Epoch {}/{}, current lr={}'.format(epoch, old_epoch+num_epochs-1, current_lr))
+        for idx in self.unfreeze_ees:
+            for param in self.model.classifiers[idx].parameters():
+                param.requires_grad = True
+            for param in self.model.ees[idx].parameters():
+                param.requires_grad = True
 
-        model.train()
-        train_loss, train_accs = loss_epoch(model, loss_func, train_dl, writer, epoch, opt)
+    def _save_specifications(self):
+        """Save model training specifications to a text file."""
+        spec_txt = (
+            f'opt: {self.opt.__class__.__name__}\n'
+            f'lr: {self.opt.param_groups[0]["lr"]}\n'
+            f'batch: {self.train_dl.batch_size}\n'
+            f'epoch: {self.num_epochs}\n'
+            f'isload: {self.isload}\n'
+            f'path_chckpnt: {self.path_chckpnt}\n'
+            f'exits_loss_weights: {self.model.getELW()}\n'
+        )
+        with open(f"{self.path}/spec.txt", "w") as file:
+            file.write(spec_txt)
 
-        model.eval()
-        with torch.no_grad():
-            val_loss, val_accs = loss_epoch(model, loss_func, val_dl, writer, epoch, opt=None)
+    @staticmethod
+    def get_lr(opt):
+        """Retrieve current learning rate from optimizer."""
+        for param_group in opt.param_groups:
+            return param_group['lr']
 
-        if val_loss < best_loss:
-            best_loss = val_loss
-            #best_model_wts = copy.deepcopy(model.state_dict())
-            torch.save({
-            'epoch': num_epochs,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': opt.state_dict(),
+    @staticmethod
+    def metric_batch(output, label):
+        """Calculate accuracy for a batch."""
+        pred = output.argmax(1, keepdim=True)
+        corrects = pred.eq(label.view_as(pred)).sum().item()
+        return corrects
+
+    def loss_batch(self, output_list, label, elws,mode):
+        """Calculate loss and accuracy for a batch."""
+        losses = [self.loss_func(output, label) * elw for output, elw in zip(output_list, elws)]
+        accs = [self.metric_batch(output, label) for output in output_list]
+        if mode=="train":
+            self.opt.zero_grad()
+            cnter=1
+            tot_train=len(self.unfreeze_ees)
+            for idx,loss in enumerate(losses):
+                if idx in self.unfreeze_ees:
+                    if (cnter<tot_train):
+                        loss.backward(retain_graph=True)
+                        cnter+=1
+                    else:loss.backward()
+            self.opt.step()
+        return [loss.item() for loss in losses], accs
+
+    def loss_epoch(self, data_loader, epoch, mode="train"):
+        """Calculate loss and accuracy for an epoch."""
+        running_loss = [0.0] * self.model.exit_num
+        running_metric = [0.0] * self.model.exit_num
+        len_data = len(data_loader.dataset)
+        elws = self.model.getELW()
+
+        with tqdm(data_loader, desc=f"{mode}: {epoch}th Epoch", unit="batch", leave=False) as t:
+            for xb, yb in t:
+                xb, yb = xb.to(self.device), yb.to(self.device)
+                output_list = self.model(xb)
+                losses, accs = self.loss_batch(output_list, yb, elws,mode)
+
+                running_loss = [sum(x) for x in zip(running_loss, losses)]
+                running_metric = [sum(x) for x in zip(running_metric, accs)]
+                t.set_postfix(accuracy=[round(100 * acc / len(xb),3) for acc in accs])
+
+        running_loss = [loss / len_data for loss in running_loss]
+        running_acc = [100 * metric / len_data for metric in running_metric]
+
+        # TensorBoard logging
+        loss_dict = {f'exit{idx}': loss for idx, loss in enumerate(running_loss)}
+        acc_dict = {f'exit{idx}': acc for idx, acc in enumerate(running_acc)}
+        self.writer.add_scalars(f'{mode}/loss', loss_dict, epoch)
+        self.writer.add_scalars(f'{mode}/acc', acc_dict, epoch)
+        self.writer.add_scalar(f'{mode}/loss_total_sum', sum(running_loss), epoch)
+
+        return sum(running_loss), running_acc
+
+    def train(self):
+        """Train the model."""
+        start_time = time.time()
+
+        for epoch in range(self.old_epoch, self.old_epoch + self.num_epochs):
+            print(f'Epoch {epoch}/{self.old_epoch + self.num_epochs - 1}, lr={self.get_lr(self.opt)}')
+
+            # Train phase
+            self.model.train()
+            train_loss, train_accs = self.loss_epoch(self.train_dl, epoch, mode="train")
+
+            # Validation phase
+            self.model.eval()
+            with torch.no_grad():
+                val_loss, val_accs = self.loss_epoch(self.val_dl, epoch, mode="val")
+
+            # Save best model
+            if val_loss < self.best_loss:
+                self.best_loss = val_loss
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': self.model.state_dict(),
+                    'optimizer_state_dict': self.opt.state_dict(),
+                    'loss': val_loss,
+                }, f'{self.path}/best_model.pth')
+                print("Saved best model weights!")
+
+            self.lr_scheduler.step(val_loss)
+
+            # Logging
+            elapsed_time = (time.time() - start_time) / 60
+            hours, minutes = divmod(elapsed_time, 60)
+            print(f'train_loss: {train_loss:.6f}, train_acc: {train_accs}')
+            print(f'val_loss: {val_loss:.6f}, val_acc: {val_accs}, time: {int(hours)}h {int(minutes)}m')
+            print('-' * 10)
+
+        # Save final checkpoint
+        torch.save({
+            'epoch': self.num_epochs,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.opt.state_dict(),
             'loss': val_loss,
-            }, path+'/best_model.pth')
-            print('saved best model weights!')
-            print('Get best val_loss')
+        }, f'{self.path}/final_model.pth')
 
-        lr_scheduler.step(val_loss)
+        self.writer.close()
 
-        total_time=(time.time()-start_time)/60
-        hours, minutes = divmod(total_time, 60)
-        print(f'train_loss: {train_loss:.6f}, train_acc: {train_accs}')
-        print(f'val_loss: {val_loss:.6f}, val_acc: {val_accs}, time: {int(hours)}h {int(minutes)}m')
-        print('-'*10)
-        writer.flush()
+        # Save final training summary
+        with open(f"{self.path}/spec.txt", "a") as file:
+            file.write(f"final_val_acc: {val_accs}\nfinal_train_acc: {train_accs}\n")
 
-    torch.save({
-            'epoch': num_epochs,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': opt.state_dict(),
-            'loss': val_loss,
-            }, path+'/chckpoint.pth')
-    writer.close()
-    linedivisor='#'*10+'\n'
-    result_txt=linedivisor+f'last_val_acc: {val_accs}\nlast_train_acc: {train_accs}\nlast_val_loss: {best_loss:.6f}\ntotal_time: {total_time:.2f}m\n'
-    with open(f"{path}/spec.txt", "a") as file:
-        file.write(result_txt)
-    
-    return model
-model = MultiExitViT(pretrained_vit,num_classes=dataset_outdim[data_choice],ee_list=[0,1,2,3,4,5,6,7,8,9],exit_loss_weights=[1,1,1,1,1,1,1,1,1,1,1]).to(device)
+model = MultiExitViT(pretrained_vit,num_classes=dataset_outdim[data_choice],ee_list=ee_list,exit_loss_weights=exit_loss_weights).to(device)
 optimizer = optim.Adam(model.parameters(), lr=start_lr, weight_decay=weight_decay)
 criterion = nn.CrossEntropyLoss()
 lr_scheduler=ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, verbose=True)
 
 params={'num_epochs':max_epochs, 'loss_func':criterion, 'optimizer':optimizer, 
         'train_dl':train_loader, 'val_dl':test_loader, 'lr_scheduler':lr_scheduler, 
-        'isload':mevit_isload, 'path_chckpnt':mevit_pretrained_path,'classifier_wise':True,
-        'unfreeze_num':0,'freeze_last':1}
-
-train_val(model=model, params=params)
-#from torchinfo import summary
-#summary(pretrained_vit,input_size= (64, 3, IMG_SIZE, IMG_SIZE))
+        'isload':mevit_isload, 'path_chckpnt':mevit_pretrained_path,'classifier_wise':classifier_wise,
+        'unfreeze_ees':unfreeze_ees}
+t1=Trainer(model=model, params=params)
+t1.train()
+for i in range(unfreeze_ees_list):
+    unfreeze_ees=[i]
+    t1.train()

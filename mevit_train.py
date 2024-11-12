@@ -169,20 +169,18 @@ def metric_batch(output, label):
 
 # function to calculate loss per mini-batch
 def loss_batch(loss_func, output_list, label, elws, opt=None):
-    losses = [loss_func(output,label)*elw for output,elw in zip(output_list,elws)]   # raw losses -> 굳이 각각 exit의 길이로 나눠줘야하나? 로스 크기만 달라지지 않나;;
+    losses = [loss_func(output,label)*elw for output,elw in zip(output_list,elws)]
     acc_s = [metric_batch(output, label) for output in output_list]
     
     if opt is not None:
         opt.zero_grad()
-        #backprop
         for loss in losses[:-1]:
-            #ee losses need to keep graph
             loss.backward(retain_graph=True)
         #final loss, graph not required
         losses[-1].backward()
         opt.step()
     
-    losses = [loss.item() for loss in losses] #for out of cuda memory error
+    losses = [loss.item() for loss in losses]
     
     return losses, acc_s
 
@@ -255,8 +253,9 @@ def train_val(model, params):
         best_loss = chckpnt['loss']
     
     if classifier_wise:
-        #freeze all except classifier
-        pass    
+        #freeze all
+        for param in model.parameters():
+            param.requires_grad = False
         #unfreeze specific classifier
         pass
     #writer=None
@@ -268,8 +267,6 @@ def train_val(model, params):
         print('Epoch {}/{}, current lr={}'.format(epoch, old_epoch+num_epochs-1, current_lr))
 
         model.train()
-        
-        
         train_loss, train_accs = loss_epoch(model, loss_func, train_dl, writer, epoch, opt)
 
         model.eval()

@@ -24,9 +24,9 @@ dataset_outdim['cifar100']=100
 
 ##############################################################
 ################ 0. Hyperparameters ##########################
-unfreeze_ees_list=[0,1,2,3,4,5,6,7,8,9]
+unfreeze_ees_list=[1,2,3,4,5,6,7,8,9]
 ##############################################################
-batch_size = 56
+batch_size = 1024
 data_choice='cifar100'
 mevit_isload=False
 mevit_pretrained_path=f'models/1108_103451/best_model.pth'
@@ -43,9 +43,10 @@ classifier_wise=True
 unfreeze_ees=[0] #unfreeze exit list ex) [0,1,2,3,4,5,6,7,8,9]
 
 # Early stopping parameters
-early_stop_patience = 5
-early_stop_counter = 0
-best_val_accuracy = 0.0
+early_stop_patience = 10
+
+lr_decrease_factor = 0.5
+lr_decrease_patience = 3
 ##############################################################
 # # 1. Data Preparation and Pretrained ViT model
 transform = transforms.Compose([
@@ -69,10 +70,6 @@ pretrained_vit.load_state_dict(torch.load(backbone_path))
 pretrained_vit = pretrained_vit.to(device)
 #from torchinfo import summary
 #summary(pretrained_vit,input_size= (64, 3, IMG_SIZE, IMG_SIZE))
-#freezing model
-for param in pretrained_vit.parameters():
-    param.requires_grad = False
-
 ##############################################################
 # # 2. Define Multi-Exit ViT
 class MultiExitViT(nn.Module):
@@ -174,7 +171,7 @@ class Trainer:
         self.val_dl = params["val_dl"];self.lr_scheduler = params["lr_scheduler"]
         self.isload = params["isload"];self.path_chckpnt = params["path_chckpnt"]
         self.classifier_wise = params["classifier_wise"];self.unfreeze_ees = params["unfreeze_ees"]
-        self.best_loss = float('inf')
+        self.best_loss = float('inf');self.early_stop_patience = params["early_stop_patience"]
         self.old_epoch = 0
         self.device = next(model.parameters()).device
 
@@ -291,6 +288,7 @@ class Trainer:
     def train(self):
         """Train the model."""
         start_time = time.time()
+        early_stop_cnter=0
 
         for epoch in range(self.old_epoch, self.old_epoch + self.num_epochs):
             print(f'Epoch {epoch}/{self.old_epoch + self.num_epochs - 1}, lr={self.get_lr(self.opt)}')
@@ -306,6 +304,7 @@ class Trainer:
 
             # Save best model
             if val_loss < self.best_loss:
+                early_stop_cnter=0
                 self.best_loss = val_loss
                 torch.save({
                     'epoch': epoch,
@@ -314,6 +313,11 @@ class Trainer:
                     'loss': val_loss,
                 }, f'{self.path}/best_model.pth')
                 print("Saved best model weights!")
+            else:
+                early_stop_cnter+=1
+                print(f"No improvement in validation accuracy! cnter: {early_stop_cnter}")
+                if early_stop_cnter>=self.early_stop_patience:
+                    print("Early stopping!");break
 
             self.lr_scheduler.step(val_loss)
 
@@ -341,14 +345,13 @@ class Trainer:
 model = MultiExitViT(pretrained_vit,num_classes=dataset_outdim[data_choice],ee_list=ee_list,exit_loss_weights=exit_loss_weights).to(device)
 optimizer = optim.Adam(model.parameters(), lr=start_lr, weight_decay=weight_decay)
 criterion = nn.CrossEntropyLoss()
-lr_scheduler=ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, verbose=True)
+lr_scheduler=ReduceLROnPlateau(optimizer, mode='min', factor=lr_decrease_factor, patience=lr_decrease_patience, verbose=True)
 
 params={'num_epochs':max_epochs, 'loss_func':criterion, 'optimizer':optimizer, 
         'train_dl':train_loader, 'val_dl':test_loader, 'lr_scheduler':lr_scheduler, 
         'isload':mevit_isload, 'path_chckpnt':mevit_pretrained_path,'classifier_wise':classifier_wise,
-        'unfreeze_ees':unfreeze_ees}
-t1=Trainer(model=model, params=params)
-t1.train()
-for i in range(unfreeze_ees_list):
-    unfreeze_ees=[i]
+        'unfreeze_ees':unfreeze_ees,'early_stop_patience':early_stop_patience}
+for i in unfreeze_ees_list:
+    params["unfreeze_ees"]=[i]
+    t1=Trainer(model=model, params=params)
     t1.train()

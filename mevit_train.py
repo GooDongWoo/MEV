@@ -14,23 +14,17 @@ from torch.utils.tensorboard import SummaryWriter
 
 IMG_SIZE = 224
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-dataset_name=dict()
-dataset_name['cifar10']=datasets.CIFAR10
-dataset_name['cifar100']=datasets.CIFAR100
-
-dataset_outdim=dict()
-dataset_outdim['cifar10']=10
-dataset_outdim['cifar100']=100
-
+dataset_name=dict();dataset_name['cifar10']=datasets.CIFAR10;dataset_name['cifar100']=datasets.CIFAR100
+dataset_outdim=dict();dataset_outdim['cifar10']=10;dataset_outdim['cifar100']=100
 ##############################################################
 ################ 0. Hyperparameters ##########################
-unfreeze_ees_list=[1,2,3,4,5,6,7,8,9]
+unfreeze_ees_list=[2,3,4,5,6,7,8,9]
 ##############################################################
 batch_size = 1024
 data_choice='cifar100'
 mevit_isload=False
 mevit_pretrained_path=f'models/1108_103451/best_model.pth'
-max_epochs = 100  # Set your max epochs
+max_epochs = 50  # Set your max epochs
 
 backbone_path=f'vit_{data_choice}_backbone.pth'
 start_lr=1e-4
@@ -43,33 +37,10 @@ classifier_wise=True
 unfreeze_ees=[0] #unfreeze exit list ex) [0,1,2,3,4,5,6,7,8,9]
 
 # Early stopping parameters
-early_stop_patience = 10
+early_stop_patience = 7
 
 lr_decrease_factor = 0.5
 lr_decrease_patience = 3
-##############################################################
-# # 1. Data Preparation and Pretrained ViT model
-transform = transforms.Compose([
-    transforms.Resize(IMG_SIZE),
-    transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-])
-
-train_dataset = dataset_name[data_choice](root='./data', train=True, download=True, transform=transform)
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-
-test_dataset = dataset_name[data_choice](root='./data', train=False, download=True, transform=transform)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-# Load the pretrained ViT model from the saved file
-pretrained_vit = models.vit_b_16(weights=None)
-pretrained_vit.heads.head = nn.Linear(pretrained_vit.heads.head.in_features, dataset_outdim[data_choice])  # Ensure output matches the number of classes
-
-# Load model weights
-pretrained_vit.load_state_dict(torch.load(backbone_path))
-pretrained_vit = pretrained_vit.to(device)
-#from torchinfo import summary
-#summary(pretrained_vit,input_size= (64, 3, IMG_SIZE, IMG_SIZE))
 ##############################################################
 # # 2. Define Multi-Exit ViT
 class MultiExitViT(nn.Module):
@@ -317,7 +288,7 @@ class Trainer:
                 early_stop_cnter+=1
                 print(f"No improvement in validation accuracy! cnter: {early_stop_cnter}")
                 if early_stop_cnter>=self.early_stop_patience:
-                    print("Early stopping!");break
+                    print("Early stopping!");print('@' * 50);break
 
             self.lr_scheduler.step(val_loss)
 
@@ -326,7 +297,7 @@ class Trainer:
             hours, minutes = divmod(elapsed_time, 60)
             print(f'train_loss: {train_loss:.6f}, train_acc: {train_accs}')
             print(f'val_loss: {val_loss:.6f}, val_acc: {val_accs}, time: {int(hours)}h {int(minutes)}m')
-            print('-' * 10)
+            print('-' * 50)
 
         # Save final checkpoint
         torch.save({
@@ -341,17 +312,40 @@ class Trainer:
         # Save final training summary
         with open(f"{self.path}/spec.txt", "a") as file:
             file.write(f"final_val_acc: {val_accs}\nfinal_train_acc: {train_accs}\n")
+##############################################################
+if __name__ == '__main__':
+    # # 1. Data Preparation and Pretrained ViT model
+    transform = transforms.Compose([
+        transforms.Resize(IMG_SIZE),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
 
-model = MultiExitViT(pretrained_vit,num_classes=dataset_outdim[data_choice],ee_list=ee_list,exit_loss_weights=exit_loss_weights).to(device)
-optimizer = optim.Adam(model.parameters(), lr=start_lr, weight_decay=weight_decay)
-criterion = nn.CrossEntropyLoss()
-lr_scheduler=ReduceLROnPlateau(optimizer, mode='min', factor=lr_decrease_factor, patience=lr_decrease_patience, verbose=True)
+    train_dataset = dataset_name[data_choice](root='./data', train=True, download=True, transform=transform)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-params={'num_epochs':max_epochs, 'loss_func':criterion, 'optimizer':optimizer, 
-        'train_dl':train_loader, 'val_dl':test_loader, 'lr_scheduler':lr_scheduler, 
-        'isload':mevit_isload, 'path_chckpnt':mevit_pretrained_path,'classifier_wise':classifier_wise,
-        'unfreeze_ees':unfreeze_ees,'early_stop_patience':early_stop_patience}
-for i in unfreeze_ees_list:
-    params["unfreeze_ees"]=[i]
-    t1=Trainer(model=model, params=params)
-    t1.train()
+    test_dataset = dataset_name[data_choice](root='./data', train=False, download=True, transform=transform)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    # Load the pretrained ViT model from the saved file
+    pretrained_vit = models.vit_b_16(weights=None)
+    pretrained_vit.heads.head = nn.Linear(pretrained_vit.heads.head.in_features, dataset_outdim[data_choice])  # Ensure output matches the number of classes
+
+    # Load model weights
+    pretrained_vit.load_state_dict(torch.load(backbone_path))
+    pretrained_vit = pretrained_vit.to(device)
+    #from torchinfo import summary
+    #summary(pretrained_vit,input_size= (64, 3, IMG_SIZE, IMG_SIZE))
+
+    for i in unfreeze_ees_list:
+        model = MultiExitViT(pretrained_vit,num_classes=dataset_outdim[data_choice],ee_list=ee_list,exit_loss_weights=exit_loss_weights).to(device)
+        optimizer = optim.Adam(model.parameters(), lr=start_lr, weight_decay=weight_decay)
+        criterion = nn.CrossEntropyLoss()
+        lr_scheduler=ReduceLROnPlateau(optimizer, mode='min', factor=lr_decrease_factor, patience=lr_decrease_patience, verbose=True)
+        params={'num_epochs':max_epochs, 'loss_func':criterion, 'optimizer':optimizer, 
+            'train_dl':train_loader, 'val_dl':test_loader, 'lr_scheduler':lr_scheduler, 
+            'isload':mevit_isload, 'path_chckpnt':mevit_pretrained_path,'classifier_wise':classifier_wise,
+            'unfreeze_ees':unfreeze_ees,'early_stop_patience':early_stop_patience}
+        params["unfreeze_ees"]=[i]
+        t1=Trainer(model=model, params=params)
+        t1.train()

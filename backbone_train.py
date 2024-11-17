@@ -15,11 +15,12 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 dataset_name=dict()
 dataset_name['cifar10']=datasets.CIFAR10
 dataset_name['cifar100']=datasets.CIFAR100
+dataset_name['imagenet']=datasets.ImageNet
 
 dataset_outdim=dict()
 dataset_outdim['cifar10']=10
 dataset_outdim['cifar100']=100
-
+dataset_name['imagenet']=1000
 ##############################################################
 data_choice='cifar100'
 isload=False

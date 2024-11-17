@@ -1,7 +1,7 @@
 import huggingface_hub
 import datasets
-
-huggingface_hub.login(token="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")
+from secret import *
+huggingface_hub.login(token=token)
 imagenet_dataset = datasets.load_dataset("imagenet-1k",cache_dir='./data/imagenet')
 '''
 import torch

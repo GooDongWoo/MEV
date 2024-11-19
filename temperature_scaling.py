@@ -59,7 +59,7 @@ if __name__=='__main__':
     ################ 0. Hyperparameters ##########################
     ##############################################################
     batch_size = 1024
-    data_choice='cifar100'
+    data_choice='cifar10'
     mevit_isload=True
     mevit_pretrained_path=f'models/{data_choice}/integrated_ee.pth'
     max_epochs = 200  # Set your max epochs

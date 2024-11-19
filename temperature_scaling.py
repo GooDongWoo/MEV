@@ -18,7 +18,6 @@ class TemperatureScaling(nn.Module):
         return logits / self.temperature
 
 def optimize_temperature(model, scalers, test_loader,exit_num=11,lr=0.01, max_iter=50):
-    
     model.eval()
     output_list_list = [[] for _ in range(exit_num)]
     labels_list = []
@@ -62,10 +61,10 @@ if __name__=='__main__':
     batch_size = 1024
     data_choice='cifar100'
     mevit_isload=True
-    mevit_pretrained_path=f'integrated_ee.pth'
+    mevit_pretrained_path=f'models/{data_choice}/integrated_ee.pth'
     max_epochs = 200  # Set your max epochs
 
-    backbone_path=f'vit_{data_choice}_backbone.pth'
+    backbone_path=f'models/{data_choice}/vit_{data_choice}_backbone.pth'
     start_lr=1e-4
     weight_decay=1e-4
 
@@ -99,7 +98,7 @@ if __name__=='__main__':
 
     model = MultiExitViT(pretrained_vit,num_classes=dataset_outdim[data_choice],ee_list=ee_list,exit_loss_weights=exit_loss_weights).to(device)
     # Assume a pretrained model (replace with your own model)
-    model.load_state_dict(torch.load('integrated_ee.pth'))  # Load your trained weights
+    model.load_state_dict(torch.load(mevit_pretrained_path))  # Load your trained weights
     model.eval()
 
     # Temperature Scaling
@@ -110,27 +109,5 @@ if __name__=='__main__':
     # Optimize temperature
     temperature_scaler = optimize_temperature(model, temperature_scalers, test_loader)
 
-    '''
-    import torch.nn.functional as F
-
-    def calculate_entropy(logits):
-        probabilities = F.softmax(logits, dim=1)
-        entropy = -torch.sum(probabilities * torch.log(probabilities + 1e-10), dim=1)
-        return entropy
-
-    def dynamic_ensemble(model, scalers, test_loader, entropy_threshold=1.0):
-        final_predictions = []
-        with torch.no_grad():
-            for images, _ in tqdm(test_loader, desc="Inference"):
-                images = images.to(device)
-                outputs = model(images)
-                scaled_logits = [scalers[i](outputs[i]) for i in range(exit_num)]
-                entropies = [calculate_entropy(logits) for logits in scaled_logits]
-                
-                # Select models below entropy threshold
-                good_logits = [scaled_logits[i] for i in range(exit_num) if entropies[i].mean().item() < entropy_threshold]
-                final_logits = torch.stack(good_logits).mean(dim=0)
-                final_predictions.append(F.softmax(final_logits, dim=1))
-        return torch.cat(final_predictions)
-
-    '''
+    # save temperature scaling values
+    torch.save(temperature_scaler, f'models/{data_choice}/temperature_scaler.pth')

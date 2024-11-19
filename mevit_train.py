@@ -22,12 +22,12 @@ dataset_outdim=dict();dataset_outdim['cifar10']=10;dataset_outdim['cifar100']=10
 unfreeze_ees_list=[0,1,2,3,4,5,6,7,8,9]
 ##############################################################
 batch_size = 1024
-data_choice='imagenet'
+data_choice='cifar10'
 mevit_isload=False
-mevit_pretrained_path=f'models/1108_103451/best_model.pth'
-max_epochs = 200  # Set your max epochs
+mevit_pretrained_path=f'.pth'
+max_epochs = 100  # Set your max epochs
 
-backbone_path=f'vit_{data_choice}_backbone.pth'
+backbone_path=f'models/{data_choice}/vit_{data_choice}_backbone.pth'
 start_lr=1e-4
 weight_decay=1e-4
 
@@ -48,7 +48,7 @@ class Trainer:
     def __init__(self, model, params):
         self.model = model
         self.num_epochs = params['num_epochs'];self.loss_func = params["loss_func"]
-        self.opt = params["optimizer"];self.train_dl = params["train_dl"]
+        self.opt = params["optimizer"];self.train_dl = params["train_dl"];self.data_choice = params["data_choice"]
         self.val_dl = params["val_dl"];self.lr_scheduler = params["lr_scheduler"]
         self.isload = params["isload"];self.path_chckpnt = params["path_chckpnt"]
         self.classifier_wise = params["classifier_wise"];self.unfreeze_ees = params["unfreeze_ees"]
@@ -58,11 +58,11 @@ class Trainer:
 
         # Initialize directory for model saving
         self.current_time = time.strftime('%m%d_%H%M%S', time.localtime())
-        self.path = f'./models/{self.current_time}'
+        self.path = f'./models/{self.data_choice}/{self.unfreeze_ees[0]}'
         os.makedirs(self.path, exist_ok=True)
 
         # Setup TensorBoard writer
-        self.writer = SummaryWriter(f'./runs/{self.current_time}')
+        self.writer = SummaryWriter(f'./runs/{self.data_choice}/{self.unfreeze_ees[0]}')
 
         # Load model checkpoint if required
         if self.isload:
@@ -254,7 +254,7 @@ if __name__ == '__main__':
         optimizer = optim.Adam(model.parameters(), lr=start_lr, weight_decay=weight_decay)
         criterion = nn.CrossEntropyLoss()
         lr_scheduler=ReduceLROnPlateau(optimizer, mode='min', factor=lr_decrease_factor, patience=lr_decrease_patience, verbose=True)
-        params={'num_epochs':max_epochs, 'loss_func':criterion, 'optimizer':optimizer, 
+        params={'num_epochs':max_epochs, 'loss_func':criterion, 'optimizer':optimizer, 'data_choice':data_choice,
             'train_dl':train_loader, 'val_dl':test_loader, 'lr_scheduler':lr_scheduler, 
             'isload':mevit_isload, 'path_chckpnt':mevit_pretrained_path,'classifier_wise':classifier_wise,
             'unfreeze_ees':unfreeze_ees,'early_stop_patience':early_stop_patience}

@@ -16,31 +16,26 @@ from collections import OrderedDict
 
 
 IMG_SIZE = 224
-dataset_name=dict()
-dataset_name['cifar10']=datasets.CIFAR10
-dataset_name['cifar100']=datasets.CIFAR100
+dataset_name=dict();dataset_name['cifar10']=datasets.CIFAR10;dataset_name['cifar100']=datasets.CIFAR100
 
-dataset_outdim=dict()
-dataset_outdim['cifar10']=10
-dataset_outdim['cifar100']=100
+dataset_outdim=dict();dataset_outdim['cifar10']=10;dataset_outdim['cifar100']=100
 
 ##############################################################
 ################ 0. Hyperparameters ##########################
 unfreeze_ees_list=[0,1,2,3,4,5,6,7,8,9]
-
+data_choice='cifar10'
 # Path to the saved model
-ee0_path='models/ee0/best_model.pth'
-ee1_path='models/ee1/best_model.pth'
-ee2_path='models/ee2/best_model.pth'
-ee3_path='models/ee3/best_model.pth'
-ee4_path='models/ee4/best_model.pth'
-ee5_path='models/ee5/best_model.pth'
-ee6_path='models/ee6/best_model.pth'
-ee7_path='models/ee7/best_model.pth'
-ee8_path='models/ee8/best_model.pth'
-ee9_path='models/ee9/best_model.pth'
+ee0_path=f'models/{data_choice}/0/best_model.pth'
+ee1_path=f'models/{data_choice}/1/best_model.pth'
+ee2_path=f'models/{data_choice}/2/best_model.pth'
+ee3_path=f'models/{data_choice}/3/best_model.pth'
+ee4_path=f'models/{data_choice}/4/best_model.pth'
+ee5_path=f'models/{data_choice}/5/best_model.pth'
+ee6_path=f'models/{data_choice}/6/best_model.pth'
+ee7_path=f'models/{data_choice}/7/best_model.pth'
+ee8_path=f'models/{data_choice}/8/best_model.pth'
+ee9_path=f'models/{data_choice}/9/best_model.pth'
 ##############################################################
-data_choice='cifar100'
 # Load the pretrained ViT model from the saved file
 pretrained_vit = models.vit_b_16(weights=None)
 pretrained_vit.heads.head = nn.Linear(pretrained_vit.heads.head.in_features, dataset_outdim[data_choice])  # Ensure output matches the number of classes
@@ -69,4 +64,4 @@ for i in range(1,10):
 
 ##############################################################
 # Save the model
-torch.save(base_model.state_dict(), 'integrated_ee.pth')
+torch.save(base_model.state_dict(), f'models/{data_choice}/integrated_ee.pth')

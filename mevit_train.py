@@ -12,20 +12,21 @@ import time
 import os
 from torch.utils.tensorboard import SummaryWriter
 from mevit_model import MultiExitViT
+import imagenet_load
 
 IMG_SIZE = 224
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-dataset_name=dict();dataset_name['cifar10']=datasets.CIFAR10;dataset_name['cifar100']=datasets.CIFAR100;dataset_name['imagenet']=datasets.ImageNet
+dataset_name=dict();dataset_name['cifar10']=datasets.CIFAR10;dataset_name['cifar100']=datasets.CIFAR100
 dataset_outdim=dict();dataset_outdim['cifar10']=10;dataset_outdim['cifar100']=100;dataset_outdim['imagenet']=1000
 ##############################################################
 ################ 0. Hyperparameters ##########################
-unfreeze_ees_list=[0,1,2,3,4,5,6,7,8,9]
+unfreeze_ees_list=[3]
 ##############################################################
 batch_size = 1024
-data_choice='cifar10'
+data_choice='imagenet'
 mevit_isload=False
 mevit_pretrained_path=f'.pth'
-max_epochs = 100  # Set your max epochs
+max_epochs = 200  # Set your max epochs
 
 backbone_path=f'models/{data_choice}/vit_{data_choice}_backbone.pth'
 start_lr=1e-4
@@ -38,7 +39,7 @@ classifier_wise=True
 unfreeze_ees=[0] #unfreeze exit list ex) [0,1,2,3,4,5,6,7,8,9]
 
 # Early stopping parameters
-early_stop_patience = 10
+early_stop_patience = 8
 
 lr_decrease_factor = 0.6
 lr_decrease_patience = 2
@@ -225,17 +226,21 @@ class Trainer:
 ##############################################################
 if __name__ == '__main__':
     # # 1. Data Preparation and Pretrained ViT model
-    transform = transforms.Compose([
-        transforms.Resize(IMG_SIZE),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-    ])
+    if data_choice == 'imagenet':
+        train_dataset = imagenet_load.IMAGENET_DATASET_TRAIN
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-    train_dataset = dataset_name[data_choice](root='./data', train=True, download=True, transform=transform)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        test_dataset = imagenet_load.IMAGENET_DATASET_TEST
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    else:
+        transform = transforms.Compose([transforms.Resize(IMG_SIZE),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        train_dataset = dataset_name[data_choice](root='./data', train=True, download=True, transform=transform)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-    test_dataset = dataset_name[data_choice](root='./data', train=False, download=True, transform=transform)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+        test_dataset = dataset_name[data_choice](root='./data', train=False, download=True, transform=transform)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     # Load the pretrained ViT model from the saved file
     pretrained_vit = models.vit_b_16(weights=models.ViT_B_16_Weights.DEFAULT)
@@ -260,4 +265,5 @@ if __name__ == '__main__':
             'unfreeze_ees':unfreeze_ees,'early_stop_patience':early_stop_patience}
         params["unfreeze_ees"]=[i]
         t1=Trainer(model=model, params=params)
+        print(f'unfreeze_ees: {params["unfreeze_ees"]}')
         t1.train()

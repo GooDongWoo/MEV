@@ -1,38 +1,22 @@
 # utils
 import torch
 import torch.nn as nn
-from torchvision import datasets, transforms,models
-from torch.utils.data import DataLoader
-import torch.nn.functional as F
+from torchvision import datasets,models
 from tqdm import tqdm  # Importing tqdm for progress bar
-from torch.utils.data import DataLoader
-
+from Dloaders import Dloaders
 # Check if GPU is available, otherwise fallback to CPU
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 IMG_SIZE = 224
-
-# 데이터셋 전처리 설정: CIFAR-10을 사용하고 이미지 크기를 32로 리사이즈
-transform = transforms.Compose([
-    transforms.Resize((IMG_SIZE, IMG_SIZE)),
-    transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-])
-dataset_name=dict()
-dataset_name['cifar10']=datasets.CIFAR10
-dataset_name['cifar100']=datasets.CIFAR100
-
-dataset_outdim=dict()
-dataset_outdim['cifar10']=10
-dataset_outdim['cifar100']=100
+batch_size = 32
+dataset_name = {'cifar10':datasets.CIFAR10, 'cifar100':datasets.CIFAR100,'imagenet':None}
+dataset_outdim = {'cifar10':10, 'cifar100':100,'imagenet':1000}
 
 ##############################################################
 data_choice='cifar100'
 ##############################################################
 
-test_dataset = dataset_name[data_choice](root='./data', train=False, download=True, transform=transform)
-test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-
+train_loader,test_loader = Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
 # Load the pretrained ViT model from the saved file
 pretrained_vit = models.vit_b_16(weights=None)
 pretrained_vit.heads.head = nn.Linear(pretrained_vit.heads.head.in_features, dataset_outdim[data_choice])  # Ensure output matches the number of classes
@@ -59,7 +43,7 @@ def getTestACC():
 
                 t.set_postfix(accuracy=100*correct/total)
 
-    print(f"Accuracy of the model on the {len(test_dataset)} test images: {100 * correct / total}%")
+    print(f"Accuracy of the model on the test images: {100 * correct / total}%")
 
 #getTestACC()
 from torchinfo import summary

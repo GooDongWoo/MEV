@@ -1,24 +1,14 @@
 # utils
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torchvision import datasets, transforms,models
-from torch.utils.data import DataLoader
-from tqdm import tqdm  # Importing tqdm for progress bar
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader
-import time
-#from torchsummary import summary as summary_
-import os
-from torch.utils.tensorboard import SummaryWriter
+from torchvision import datasets,models
 from mevit_train import MultiExitViT
 from collections import OrderedDict
 
 
 IMG_SIZE = 224
-dataset_name=dict();dataset_name['cifar10']=datasets.CIFAR10;dataset_name['cifar100']=datasets.CIFAR100
-
-dataset_outdim=dict();dataset_outdim['cifar10']=10;dataset_outdim['cifar100']=100
+dataset_name = {'cifar10':datasets.CIFAR10, 'cifar100':datasets.CIFAR100,'imagenet':None}
+dataset_outdim = {'cifar10':10, 'cifar100':100,'imagenet':1000}
 
 ##############################################################
 ################ 0. Hyperparameters ##########################

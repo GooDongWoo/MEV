@@ -1,24 +1,19 @@
 # utils
 import torch
 import torch.nn as nn
-from torchvision import datasets, transforms, models
-from torch.utils.data import DataLoader
+from torchvision import datasets, models
 from tqdm import tqdm  # Importing tqdm for progress bar
 from mevit_model import MultiExitViT
-
+from Dloaders import Dloaders
 IMG_SIZE = 224
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-dataset_name = dict()
-dataset_name['cifar10'] = datasets.CIFAR10
-dataset_name['cifar100'] = datasets.CIFAR100
-dataset_outdim = dict()
-dataset_outdim['cifar10'] = 10
-dataset_outdim['cifar100'] = 100
+dataset_name = {'cifar10':datasets.CIFAR10, 'cifar100':datasets.CIFAR100,'imagenet':None}
+dataset_outdim = {'cifar10':10, 'cifar100':100,'imagenet':1000}
 ##############################################################
 ################ 0. Hyperparameters ##########################
 batch_size = 32
 data_choice = 'cifar100'
-mevit_pretrained_path = f'integrated_ee.pth'
+mevit_pretrained_path=f'models/{data_choice}/integrated_ee.pth'
 
 backbone_path = f'vit_{data_choice}_backbone.pth'
 ee_list = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # exit list ex) [0,1,2,3,4,5,6,7,8,9]
@@ -26,15 +21,7 @@ exit_loss_weights = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]  # exit마다 가중치
 
 ##############################################################
 if __name__ == '__main__':
-    # # 1. Data Preparation and Pretrained ViT model
-    transform = transforms.Compose([
-        transforms.Resize(IMG_SIZE),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-    ])
-
-    test_dataset = dataset_name[data_choice](root='./data', train=False, download=True, transform=transform)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    train_loader,test_loader = Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
 
     # Load the pretrained ViT model from the saved file
     pretrained_vit = models.vit_b_16(weights=None)

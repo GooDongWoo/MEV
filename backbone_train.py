@@ -2,26 +2,19 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader
-import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision
 from tqdm import tqdm
 import time
 from torch.utils.tensorboard import SummaryWriter
+from Dloaders import Dloaders
 
 IMG_SIZE = 224
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-dataset_name=dict()
-dataset_name['cifar10']=datasets.CIFAR10
-dataset_name['cifar100']=datasets.CIFAR100
-dataset_name['imagenet']=datasets.ImageNet
-
-dataset_outdim=dict()
-dataset_outdim['cifar10']=10
-dataset_outdim['cifar100']=100
-dataset_name['imagenet']=1000
+dataset_name = {'cifar10':datasets.CIFAR10, 'cifar100':datasets.CIFAR100,'imagenet':None}
+dataset_outdim = {'cifar10':10, 'cifar100':100,'imagenet':1000}
 ##############################################################
+batch_size = 32
 data_choice='cifar100'
 isload=False
 max_epochs = 100  # Set your max epochs
@@ -33,17 +26,7 @@ early_stop_patience = 5
 early_stop_counter = 0
 best_val_accuracy = 0.0
 ##############################################################
-transform = transforms.Compose([
-    transforms.Resize(IMG_SIZE),
-    transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-])
-
-train_dataset = dataset_name[data_choice](root='./data', train=True, download=True, transform=transform)
-train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-
-test_dataset = dataset_name[data_choice](root='./data', train=False, download=True, transform=transform)
-test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+train_loader,test_loader = Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
 
 # Define the model (assuming you have a similar model as in TensorFlow)
 model = torchvision.models.vit_b_16(weights=torchvision.models.ViT_B_16_Weights.DEFAULT)

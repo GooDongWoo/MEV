@@ -10,6 +10,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from tqdm import tqdm
 from mevit_model import MultiExitViT
+from Dloaders import Dloaders
 
 IMG_SIZE = 224
 dataset_name = {'cifar10': datasets.CIFAR10, 'cifar100': datasets.CIFAR100, 'imagenet': datasets.ImageNet}

@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 from torchvision import models,datasets, transforms
 from mevit_model import MultiExitViT
 from tqdm import tqdm
-
+from Dloaders import Dloaders
 
 # Define the Temperature Scaling class
 class TemperatureScaling(nn.Module):
@@ -53,8 +53,8 @@ def optimize_temperature(model, scalers, test_loader,exit_num=11,lr=0.01, max_it
 if __name__=='__main__':
     IMG_SIZE = 224
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    dataset_name=dict();dataset_name['cifar10']=datasets.CIFAR10;dataset_name['cifar100']=datasets.CIFAR100;dataset_name['imagenet']=datasets.ImageNet
-    dataset_outdim=dict();dataset_outdim['cifar10']=10;dataset_outdim['cifar100']=100;dataset_outdim['imagenet']=1000
+    dataset_name = {'cifar10':datasets.CIFAR10, 'cifar100':datasets.CIFAR100,'imagenet':None}
+    dataset_outdim = {'cifar10':10, 'cifar100':100,'imagenet':1000}
     ##############################################################
     ################ 0. Hyperparameters ##########################
     ##############################################################
@@ -72,17 +72,7 @@ if __name__=='__main__':
     exit_loss_weights=[1,1,1,1,1,1,1,1,1,1,1]#exit마다 가중치
     exit_num=11
     ##############################################################
-    transform = transforms.Compose([
-            transforms.Resize(IMG_SIZE),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-        ])
-
-    train_dataset = dataset_name[data_choice](root='./data', train=True, download=True, transform=transform)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-
-    test_dataset = dataset_name[data_choice](root='./data', train=False, download=True, transform=transform)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    train_loader,test_loader = Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
 
     # Load the pretrained ViT model from the saved file
     pretrained_vit = models.vit_b_16(weights=models.ViT_B_16_Weights.DEFAULT)

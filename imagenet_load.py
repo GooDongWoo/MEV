@@ -29,8 +29,8 @@ class ImageNetdataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
-mean = [x for x in [0.485, 0.456, 0.406]]
-std = [x for x in [0.229, 0.224, 0.225]]
+mean = [0.485, 0.456, 0.406]
+std = [0.229, 0.224, 0.225]
 
 trans = transforms.Compose([
     transforms.Resize(256),

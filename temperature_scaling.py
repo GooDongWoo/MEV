@@ -72,7 +72,8 @@ if __name__=='__main__':
     exit_loss_weights=[1,1,1,1,1,1,1,1,1,1,1]#exit마다 가중치
     exit_num=11
     ##############################################################
-    train_loader,test_loader = Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
+    dloaders=Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
+    train_loader,test_loader = dloaders.get_loaders()
 
     # Load the pretrained ViT model from the saved file
     pretrained_vit = models.vit_b_16(weights=models.ViT_B_16_Weights.DEFAULT)

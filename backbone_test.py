@@ -16,7 +16,8 @@ dataset_outdim = {'cifar10':10, 'cifar100':100,'imagenet':1000}
 data_choice='cifar100'
 ##############################################################
 
-train_loader,test_loader = Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
+dloaders=Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
+train_loader,test_loader = dloaders.get_loaders()
 # Load the pretrained ViT model from the saved file
 pretrained_vit = models.vit_b_16(weights=None)
 pretrained_vit.heads.head = nn.Linear(pretrained_vit.heads.head.in_features, dataset_outdim[data_choice])  # Ensure output matches the number of classes

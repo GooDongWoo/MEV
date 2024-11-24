@@ -1,7 +1,6 @@
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from torch.utils.data import DataLoader
-import imagenet_load
 
 class Dloaders:
     def __init__(self,data_choice='cifar100',batch_size=1024,IMG_SIZE=224):
@@ -10,17 +9,25 @@ class Dloaders:
         
         self.data_choice = data_choice
         if data_choice == 'imagenet':
-            train_dataset = imagenet_load.IMAGENET_DATASET_TRAIN
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-            test_dataset = imagenet_load.IMAGENET_DATASET_TEST
-            test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+            import imagenet_load
+            
+            self.train_dataset = imagenet_load.IMAGENET_DATASET_TRAIN
+            self.train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=True)
+            self.test_dataset = imagenet_load.IMAGENET_DATASET_TEST
+            self.test_loader = DataLoader(self.test_dataset, batch_size=batch_size, shuffle=False)
         else:
             transform = transforms.Compose([transforms.Resize(IMG_SIZE),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-            train_dataset = self.dataset_name[data_choice](root='./data', train=True, download=True, transform=transform)
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-            test_dataset = self.dataset_name[data_choice](root='./data', train=False, download=True, transform=transform)
-            test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-        return train_loader,test_loader
+            self.train_dataset = self.dataset_name[data_choice](root='./data', train=True, download=True, transform=transform)
+            self.train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=True)
+            self.test_dataset = self.dataset_name[data_choice](root='./data', train=False, download=True, transform=transform)
+            self.test_loader = DataLoader(self.test_dataset, batch_size=batch_size, shuffle=False)
+        
+        return None
+    
+    def get_loaders(self):
+        return self.train_loader,  self.test_loader
+    
+    def get_datasets(self):
+        return self.train_dataset,  self.test_dataset

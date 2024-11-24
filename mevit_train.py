@@ -222,7 +222,8 @@ class Trainer:
             file.write(f"final_val_acc: {val_accs}\nfinal_train_acc: {train_accs}\n")
 ##############################################################
 if __name__ == '__main__':
-    train_loader,test_loader = Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
+    dloaders=Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
+    train_loader,test_loader = dloaders.get_loaders()
 
     # Load the pretrained ViT model from the saved file
     pretrained_vit = models.vit_b_16(weights=models.ViT_B_16_Weights.DEFAULT)

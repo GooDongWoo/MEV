@@ -26,7 +26,8 @@ early_stop_patience = 5
 early_stop_counter = 0
 best_val_accuracy = 0.0
 ##############################################################
-train_loader,test_loader = Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
+dloaders=Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
+train_loader,test_loader = dloaders.get_loaders()
 
 # Define the model (assuming you have a similar model as in TensorFlow)
 model = torchvision.models.vit_b_16(weights=torchvision.models.ViT_B_16_Weights.DEFAULT)

@@ -30,7 +30,7 @@ class MultiExitViT(nn.Module):
         self.ees = nn.ModuleList([self.create_exit_Tblock(dim) for _ in range(len(ee_list))])
         self.classifiers = nn.ModuleList([nn.Linear(dim, num_classes) for _ in range(len(ee_list))])
         
-        
+        self.each_ee_test_mode = False
 
     def create_exit_Tblock(self, dim):
         return nn.Sequential(
@@ -63,8 +63,42 @@ class MultiExitViT(nn.Module):
         x = x.permute(0, 2, 1)
 
         return x
-    
+    def set_each_ee_test_mode(self,num = 10):#last exit
+        self.each_ee_test_mode = True
+        self.each_ee_test_what_num = num
+        
+    def forward_each_ee(self, x):
+        target_exit = self.each_ee_test_what_num
+        
+        x = self._process_input(x)
+        n = x.shape[0]
+
+        # Expand the class token to the full batch
+        batch_class_token = self.class_token.expand(n, -1, -1)
+        x = torch.cat([batch_class_token, x], dim=1)
+        x = x + self.pos_embedding
+        x = self.dropdout(x)
+        
+        if target_exit == (self.exit_num - 1):   #last exit
+            for block in (self.encoder_blocks):
+                x = block(x)
+            x = self.ln(x)
+            x = x[:, 0]
+
+            x = self.heads(x)
+            return x
+        
+        else:
+            for idx, block in enumerate(self.encoder_blocks):
+                x = block(x)
+                if idx == target_exit:
+                    y = self.ees[target_exit](x)
+                    y = y[:, 0]
+                    y = self.classifiers[target_exit](y)
+                    return y
+
     def forward(self, x):
+        if self.each_ee_test_mode:return self.forward_each_ee(x)
         ee_cnter=0
         outputs = []
         x = self._process_input(x)

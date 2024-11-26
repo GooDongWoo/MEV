@@ -1,10 +1,10 @@
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
-from torchvision import models,datasets, transforms
-from mevit_model import MultiExitViT
+import torch.nn.functional as F
+from torchvision import datasets
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from Dloaders import Dloaders
 
@@ -17,37 +17,32 @@ class TemperatureScaling(nn.Module):
     def forward(self, logits):
         return logits / self.temperature
 
-def optimize_temperature(model, scalers, test_loader,exit_num=11,lr=0.01, max_iter=50):
-    model.eval()
-    output_list_list = [[] for _ in range(exit_num)]
-    labels_list = []
+def optimize_temperature(output_tensor, labels, scalers, optimizers, lr_schedulers, exit_num=11, max_epochs=200):
+    writer = SummaryWriter(f'./runs/{data_choice}/ts/')
+    accs = [0]*exit_num
+    for i in range(exit_num):
+        accs[i] = labels.eq(output_tensor[i].argmax(dim = 1)).sum().item() / len(labels)
     
-    # Collect logits and labels
-    with torch.no_grad():
-        for images, labels in tqdm(test_loader, desc="Collecting logits",leave=False):
-            images, labels = images.cuda(), labels.cuda()
-            output_list = model(images)
-            for i in range(exit_num):
-                output_list_list[i].append(output_list[i])
-            labels_list.append(labels)
-
-    output_list=[torch.cat(output_list_list[i]) for i in range(exit_num)]
-    labels = torch.cat(labels_list)
-    
-    # Define NLL loss and optimizer
-    nll_criterion = nn.CrossEntropyLoss()
-    optimizers = [optim.LBFGS([scalers[i].temperature], lr=lr, max_iter=max_iter) for i in range(exit_num)]
+    for i in range(exit_num):
+        scalers[i].train()
 
     # Optimization loop
-    for i in tqdm(range(exit_num),desc="Optimizing temperature",leave=False):
-        def closure():
+    for epoch in tqdm(range(max_epochs), desc='Training scalers'):
+        for i in range(exit_num):
             optimizers[i].zero_grad()
-            loss = nll_criterion(scalers[i](output_list[i]), labels)
+            
+            logits_scaled = scalers[i](output_tensor[i])
+            loss = F.cross_entropy(logits_scaled, labels)
             loss.backward()
-            return loss
-        optimizers[i].step(closure)
+            optimizers[i].step()
+            lr_schedulers[i].step(loss)
+            
+            writer.add_scalar(f'loss_{i}th_exit', loss, epoch)
+            writer.add_scalar(f'T_val_{i}th_exit', scalers[i].temperature.item(), epoch)
+            
 
     print(f"Optimized Temperature: {[scaler.temperature.item() for scaler in scalers]}")
+    writer.close()
     return scalers
 ####################################################################
 if __name__=='__main__':
@@ -59,46 +54,40 @@ if __name__=='__main__':
     ################ 0. Hyperparameters ##########################
     ##############################################################
     batch_size = 1024
-    data_choice='cifar10'
+    data_choice='cifar100'
     mevit_isload=True
     mevit_pretrained_path=f'models/{data_choice}/integrated_ee.pth'
-    max_epochs = 200  # Set your max epochs
+    max_epochs = 2000  # Set your max epochs
 
     backbone_path=f'models/{data_choice}/vit_{data_choice}_backbone.pth'
-    start_lr=1e-4
-    weight_decay=1e-4
+    start_lr=1e-3
+    weight_decay=1e-2
 
     ee_list=[0,1,2,3,4,5,6,7,8,9]#exit list ex) [0,1,2,3,4,5,6,7,8,9]
     exit_loss_weights=[1,1,1,1,1,1,1,1,1,1,1]#exit마다 가중치
     exit_num=11
+    
+    lr_decrease_factor = 0.6
+    lr_decrease_patience = 2
+    
+    cache_file_path = f'cache_result_mevit_{data_choice}.pt'
     ##############################################################
     dloaders=Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
-    train_loader,test_loader = dloaders.get_loaders()
 
-    # Load the pretrained ViT model from the saved file
-    pretrained_vit = models.vit_b_16(weights=models.ViT_B_16_Weights.DEFAULT)
-
-    if data_choice != 'imagenet':
-        pretrained_vit.heads.head = nn.Linear(pretrained_vit.heads.head.in_features, dataset_outdim[data_choice])  # Ensure output matches the number of classes
-
-        # Load model weights
-        pretrained_vit.load_state_dict(torch.load(backbone_path))
-        pretrained_vit = pretrained_vit.to(device)
-    #from torchinfo import summary
-    #summary(pretrained_vit,input_size= (64, 3, IMG_SIZE, IMG_SIZE))
-
-    model = MultiExitViT(pretrained_vit,num_classes=dataset_outdim[data_choice],ee_list=ee_list,exit_loss_weights=exit_loss_weights).to(device)
-    # Assume a pretrained model (replace with your own model)
-    model.load_state_dict(torch.load(mevit_pretrained_path))  # Load your trained weights
-    model.eval()
+    # load cached output tensor
+    output_tensor = torch.load(cache_file_path).to(device)
+    _, test_dataset = dloaders.get_datasets()
+    labels_list = test_dataset.targets
+    labels=torch.tensor(labels_list).to(device)
 
     # Temperature Scaling
     temperature_scalers = [TemperatureScaling().to(device) for _ in range(exit_num)]
-
+    optimizers = [optim.Adam([temperature_scalers[i].temperature], lr=start_lr, weight_decay=weight_decay) for i in range(exit_num)]
+    lr_schedulers=[ReduceLROnPlateau(optimizers[i], mode='min', factor=lr_decrease_factor, patience=lr_decrease_patience, verbose=True) for i in range(exit_num)]
     # Define a function to optimize the temperature
 
     # Optimize temperature
-    temperature_scaler = optimize_temperature(model, temperature_scalers, test_loader)
+    temperature_scaler = optimize_temperature(output_tensor, labels, temperature_scalers, optimizers, lr_schedulers, exit_num=exit_num, max_epochs=max_epochs)
 
     # save temperature scaling values
     torch.save(temperature_scaler, f'models/{data_choice}/temperature_scaler.pth')

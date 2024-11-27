@@ -17,7 +17,7 @@ dataset_name = {'cifar10':datasets.CIFAR10, 'cifar100':datasets.CIFAR100,'imagen
 dataset_outdim = {'cifar10':10, 'cifar100':100,'imagenet':1000}
 ##############################################################
 ################ 0. Hyperparameters ##########################
-unfreeze_ees_list=[3]
+unfreeze_ees_list=[7]
 ##############################################################
 batch_size = 1024
 data_choice='imagenet'
@@ -33,7 +33,7 @@ ee_list=[0,1,2,3,4,5,6,7,8,9]#exit list ex) [0,1,2,3,4,5,6,7,8,9]
 exit_loss_weights=[1,1,1,1,1,1,1,1,1,1,1]#exit마다 가중치
 
 classifier_wise=True
-unfreeze_ees=[0] #unfreeze exit list ex) [0,1,2,3,4,5,6,7,8,9]
+unfreeze_ees=[] #unfreeze exit list ex) [0,1,2,3,4,5,6,7,8,9]
 
 # Early stopping parameters
 early_stop_patience = 8

@@ -9,19 +9,17 @@ from tqdm import tqdm
 from Dloaders import Dloaders
 
 # Define the Temperature Scaling class
-class TemperatureScaling(nn.Module):
-    def __init__(self):
+class MatrixScaling(nn.Module):
+    def __init__(self, num_classes):
         super().__init__()
-        self.temperature = nn.Parameter(torch.ones(1) * 1.0)  # Initialize temperature as 1.0
+        self.W = torch.nn.Parameter(torch.eye(num_classes))
+        self.b = torch.nn.Parameter(torch.zeros(1))
 
     def forward(self, logits):
-        return logits / self.temperature
+        return torch.matmul(logits, self.W) + self.b
 
-def optimize_temperature(output_tensor, labels, scalers, optimizers, lr_schedulers, exit_num=11, max_epochs=200):
+def optimize_W(output_tensor, labels, scalers, optimizers, lr_schedulers, exit_num=11, max_epochs=200):
     writer = SummaryWriter(writer_path)
-    accs = [0]*exit_num
-    for i in range(exit_num):
-        accs[i] = labels.eq(output_tensor[i].argmax(dim = 1)).sum().item() / len(labels)
     
     for i in range(exit_num):
         scalers[i].train()
@@ -30,11 +28,7 @@ def optimize_temperature(output_tensor, labels, scalers, optimizers, lr_schedule
     for epoch in tqdm(range(max_epochs), desc='Training scalers'):
         for i in range(exit_num):
             optimizers[i].zero_grad()
-            '''t = scalers[i](output_tensor[i])
-            t = F.softmax(t, dim = 1)
-            t = torch.max(t, dim = 1).values
-            t = (t - accs[i]) ** 2
-            loss = t.sum()'''
+            
             logits_scaled = scalers[i](output_tensor[i])
             loss = F.cross_entropy(logits_scaled, labels)
             loss.backward()
@@ -42,10 +36,7 @@ def optimize_temperature(output_tensor, labels, scalers, optimizers, lr_schedule
             lr_schedulers[i].step(loss)
             
             writer.add_scalar(f'loss_{i}th_exit', loss, epoch)
-            writer.add_scalar(f'T_val_{i}th_exit', scalers[i].temperature.item(), epoch)
-            
 
-    print(f"Optimized Temperature: {[scaler.temperature.item() for scaler in scalers]}")
     writer.close()
     return scalers
 ####################################################################
@@ -61,7 +52,7 @@ if __name__=='__main__':
     data_choice='cifar100'
     mevit_isload=True
     mevit_pretrained_path=f'models/{data_choice}/integrated_ee.pth'
-    max_epochs = 2000  # Set your max epochs
+    max_epochs = 500  # Set your max epochs
 
     backbone_path=f'models/{data_choice}/vit_{data_choice}_backbone.pth'
     start_lr=1e-3
@@ -76,7 +67,7 @@ if __name__=='__main__':
     
     cache_file_path = f'cache_result_mevit_{data_choice}.pt'
     writer_path = f'./runs/{data_choice}/ms/'
-    scaler_path = f'models/{data_choice}/temperature_scaler.pth'
+    scaler_path = f'models/{data_choice}/matrix_scaler.pth'
     ##############################################################
     dloaders=Dloaders(data_choice=data_choice,batch_size=batch_size,IMG_SIZE=IMG_SIZE)
 
@@ -87,13 +78,13 @@ if __name__=='__main__':
     labels=torch.tensor(labels_list).to(device)
 
     # Temperature Scaling
-    temperature_scalers = [TemperatureScaling().to(device) for _ in range(exit_num)]
-    optimizers = [optim.Adam([temperature_scalers[i].temperature], lr=start_lr, weight_decay=weight_decay) for i in range(exit_num)]
+    mat_scalers = [MatrixScaling(dataset_outdim[data_choice]).to(device) for _ in range(exit_num)]
+    optimizers = [optim.Adam(mat_scalers[i].parameters(), lr=start_lr, weight_decay=weight_decay) for i in range(exit_num)]
     lr_schedulers=[ReduceLROnPlateau(optimizers[i], mode='min', factor=lr_decrease_factor, patience=lr_decrease_patience, verbose=True) for i in range(exit_num)]
     # Define a function to optimize the temperature
 
     # Optimize temperature
-    temperature_scaler = optimize_temperature(output_tensor, labels, temperature_scalers, optimizers, lr_schedulers, exit_num=exit_num, max_epochs=max_epochs)
+    mat_scalers = optimize_W(output_tensor, labels, mat_scalers, optimizers, lr_schedulers, exit_num=exit_num, max_epochs=max_epochs)
 
     # save temperature scaling values
-    torch.save(temperature_scaler, scaler_path)
+    torch.save(mat_scalers, scaler_path)

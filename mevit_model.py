@@ -67,6 +67,17 @@ class MultiExitViT(nn.Module):
         self.each_ee_test_mode = True
         self.each_ee_test_what_num = num
         
+    def set_MC_dropout_mode(self, p):
+        self.each_ee_test_mode = False
+        for module in self.modules():
+            if isinstance(module, nn.Dropout):
+                module.p = p
+            if isinstance(module, models.vision_transformer.EncoderBlock):
+                for sub_module in module.modules():
+                    if isinstance(sub_module, nn.Dropout):
+                        sub_module.p = p
+        return 
+
     def forward_each_ee(self, x):
         target_exit = self.each_ee_test_what_num
         

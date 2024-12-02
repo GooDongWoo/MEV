@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data import DataLoader
 
 class Dloaders:
-    def __init__(self,data_choice='cifar100',batch_size=1024,IMG_SIZE=224):
+    def __init__(self,data_choice='cifar100',batch_size=1024,IMG_SIZE=224, num_workers = 6):
         self.dataset_name = {'cifar10':datasets.CIFAR10, 'cifar100':datasets.CIFAR100,'imagenet':None}
         self.dataset_outdim = {'cifar10':10, 'cifar100':100,'imagenet':1000}
         
@@ -12,9 +12,9 @@ class Dloaders:
             import imagenet_load
             
             self.train_dataset = imagenet_load.IMAGENET_DATASET_TRAIN
-            self.train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=True)
+            self.train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
             self.test_dataset = imagenet_load.IMAGENET_DATASET_TEST
-            self.test_loader = DataLoader(self.test_dataset, batch_size=batch_size, shuffle=False)
+            self.test_loader = DataLoader(self.test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
         else:
             transform = transforms.Compose([transforms.Resize(IMG_SIZE),
                 transforms.ToTensor(),

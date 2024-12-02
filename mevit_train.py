@@ -17,12 +17,12 @@ dataset_name = {'cifar10':datasets.CIFAR10, 'cifar100':datasets.CIFAR100,'imagen
 dataset_outdim = {'cifar10':10, 'cifar100':100,'imagenet':1000}
 ##############################################################
 ################ 0. Hyperparameters ##########################
-unfreeze_ees_list=[7]
+unfreeze_ees_list=[8]
 ##############################################################
 batch_size = 1024
 data_choice='imagenet'
 mevit_isload=False
-mevit_pretrained_path=f'models/{data_choice}/integrated_ee.pth'
+mevit_pretrained_path=f'models/{data_choice}/{unfreeze_ees_list[0]}/best_model.pth'
 max_epochs = 200  # Set your max epochs
 
 backbone_path=f'models/{data_choice}/vit_{data_choice}_backbone.pth'

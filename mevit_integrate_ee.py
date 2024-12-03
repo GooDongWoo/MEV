@@ -13,7 +13,7 @@ dataset_outdim = {'cifar10':10, 'cifar100':100,'imagenet':1000}
 ##############################################################
 ################ 0. Hyperparameters ##########################
 unfreeze_ees_list=[0,1,2,3,4,5,6,7,8,9]
-data_choice='cifar10'
+data_choice='imagenet'
 # Path to the saved model
 ee0_path=f'models/{data_choice}/0/best_model.pth'
 ee1_path=f'models/{data_choice}/1/best_model.pth'

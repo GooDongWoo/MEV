@@ -3,3 +3,4 @@ data
 *.pyc
 models
 secret.py
+cache_result_mevit_imagenet.pt

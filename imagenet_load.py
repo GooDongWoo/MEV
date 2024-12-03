@@ -19,6 +19,9 @@ class ImageNetdataset(torch.utils.data.Dataset):
         self.transforms = None
         if transforms:
             self.transforms = transforms
+        self.targets = self.dataset['label']
+
+        
     def __getitem__(self, index):
         image = self.dataset[index]["image"]
         label = self.dataset[index]["label"]
